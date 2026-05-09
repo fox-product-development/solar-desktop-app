@@ -1,7 +1,9 @@
 # ui/widget.py
+import datetime
 import customtkinter as ctk
 import ctypes
 import sys
+import config
 
 # --- Theme ---
 ctk.set_appearance_mode("light")
@@ -20,7 +22,6 @@ AMBER       = "#f0a500"
 
 
 def _hwnd(widget):
-    """Get the real Windows HWND for a tkinter widget."""
     if sys.platform != "win32":
         return None
     hwnd = ctypes.windll.user32.GetParent(widget.winfo_id())
@@ -28,7 +29,6 @@ def _hwnd(widget):
 
 
 class Card(ctk.CTkFrame):
-    """White rounded card matching the mockup style."""
     def __init__(self, parent, **kwargs):
         super().__init__(
             parent,
@@ -41,7 +41,6 @@ class Card(ctk.CTkFrame):
 
 
 class SectionLabel(ctk.CTkLabel):
-    """Small uppercase section header."""
     def __init__(self, parent, text, **kwargs):
         super().__init__(
             parent,
@@ -54,10 +53,13 @@ class SectionLabel(ctk.CTkLabel):
 
 class SolarWidget(ctk.CTk):
 
-    def __init__(self):
+    def __init__(self, refresher=None):
         super().__init__()
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
+
+        self.refresher = refresher
+        self._refs = {}
 
         # --- Window behaviour ---
         self.overrideredirect(True)
@@ -89,62 +91,64 @@ class SolarWidget(ctk.CTk):
         self._build_daily()
         self._build_forecast()
 
+        # --- Start live update loop ---
+        self.after(1000, self._update_ui)
+
         # --- Push to bottom of Z-order ---
         self.after(200, self._push_to_bottom)
 
-    def _pad(self, pady=(0, 8)):
-        """Standard padding frame between sections."""
-        ctk.CTkFrame(self.scroll, fg_color=BG, height=pady[1]).pack(fill="x")
+    def _pad(self, height=4):
+        ctk.CTkFrame(self.scroll, fg_color=BG, height=height).pack(fill="x")
+
+    # ------------------------------------------------------------------ #
+    # Layout builders                                                      #
+    # ------------------------------------------------------------------ #
 
     def _build_header(self):
-        """Weather + title bar."""
-        # Title
         title = ctk.CTkLabel(
             self.scroll,
             text="SOLAR MONITOR — LEIGHTON BUZZARD",
             font=ctk.CTkFont(size=9, weight="bold"),
             text_color=TEAL,
         )
-        title.pack(anchor="w", padx=14, pady=(6, 1))
+        title.pack(anchor="w", padx=14, pady=(8, 2))
 
-        # Weather card
         card = Card(self.scroll)
-        card.pack(fill="x", padx=10, pady=(0, 1))
+        card.pack(fill="x", padx=10, pady=(0, 2))
 
         row = ctk.CTkFrame(card, fg_color=CARD)
-        row.pack(fill="x", padx=10, pady=0)
+        row.pack(fill="x", padx=10, pady=1)
 
-        # Icon + temp
-        ctk.CTkLabel(
-            row, text="⛅", font=ctk.CTkFont(size=24),
-            text_color=TEXT
-        ).pack(side="left")
+        self._refs["weather_icon"] = ctk.CTkLabel(
+            row, text="--",
+            font=ctk.CTkFont(size=24), text_color=TEXT
+        )
+        self._refs["weather_icon"].pack(side="left")
 
         temp_frame = ctk.CTkFrame(row, fg_color=CARD)
         temp_frame.pack(side="left", padx=8)
-        ctk.CTkLabel(
-            temp_frame, text="19°C",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=TEXT
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            temp_frame, text="Mainly clear · Wind 12 km/h",
-            font=ctk.CTkFont(size=10),
-            text_color=MUTED
-        ).pack(anchor="w")
 
-        # Updated time
-        ctk.CTkLabel(
-            row, text="Updated\n10:42",
-            font=ctk.CTkFont(size=10),
-            text_color=MUTED,
-            justify="right"
-        ).pack(side="right")
+        self._refs["temp"] = ctk.CTkLabel(
+            temp_frame, text="--°C",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT
+        )
+        self._refs["temp"].pack(anchor="w")
+
+        self._refs["condition"] = ctk.CTkLabel(
+            temp_frame, text="Loading...",
+            font=ctk.CTkFont(size=10), text_color=MUTED
+        )
+        self._refs["condition"].pack(anchor="w")
+
+        self._refs["updated"] = ctk.CTkLabel(
+            row, text="Updated\n--:--",
+            font=ctk.CTkFont(size=10), text_color=MUTED, justify="right"
+        )
+        self._refs["updated"].pack(side="right")
 
         self._pad()
 
     def _build_realtime(self):
-        """Realtime generation section."""
         SectionLabel(self.scroll, "Realtime").pack(
             anchor="w", padx=14, pady=(0, 4))
 
@@ -163,11 +167,11 @@ class SolarWidget(ctk.CTk):
         ).pack(anchor="w")
         gen_row = ctk.CTkFrame(left, fg_color=CARD)
         gen_row.pack(anchor="w")
-        ctk.CTkLabel(
-            gen_row, text="2.90",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color=TEAL
-        ).pack(side="left")
+        self._refs["pv_power"] = ctk.CTkLabel(
+            gen_row, text="--",
+            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEAL
+        )
+        self._refs["pv_power"].pack(side="left")
         ctk.CTkLabel(
             gen_row, text=" kW",
             font=ctk.CTkFont(size=12), text_color=MUTED
@@ -182,11 +186,11 @@ class SolarWidget(ctk.CTk):
         ).pack(anchor="e")
         bh_row = ctk.CTkFrame(right, fg_color=CARD)
         bh_row.pack(anchor="e")
-        ctk.CTkLabel(
-            bh_row, text="2.41",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=AMBER
-        ).pack(side="left")
+        self._refs["best_hour"] = ctk.CTkLabel(
+            bh_row, text="--",
+            font=ctk.CTkFont(size=20, weight="bold"), text_color=AMBER
+        )
+        self._refs["best_hour"].pack(side="left")
         ctk.CTkLabel(
             bh_row, text=" kWh",
             font=ctk.CTkFont(size=12), text_color=MUTED
@@ -195,7 +199,6 @@ class SolarWidget(ctk.CTk):
         self._pad()
 
     def _build_daily(self):
-        """Today / This week toggle section."""
         # Toggle buttons
         tog = ctk.CTkFrame(self.scroll, fg_color=BG)
         tog.pack(fill="x", padx=10, pady=(0, 6))
@@ -222,31 +225,33 @@ class SolarWidget(ctk.CTk):
         )
         self.btn_week.grid(row=0, column=1, padx=(2, 0), sticky="ew")
 
-        # Daily stats card
+        # Stats card
         card = Card(self.scroll)
         card.pack(fill="x", padx=10, pady=(0, 4))
 
-        stats = [
-            ("Generated so far", "10.59 kWh", TEAL),
-            ("Load satisfied",   "100%",      TEXT),
-            ("Exported",         "3.1 kWh",   TEXT),
-            ("Export earnings",  "£0.37",     TEAL),
-            ("7-day avg generation", "14.3 kWh", TEXT),
-            ("7-day avg export", "5.8 kWh · £0.70", TEXT),
+        stat_keys = [
+            ("generated",  "Generated so far",      "--",  TEAL),
+            ("load_pct",   "Load satisfied",         "--",  TEXT),
+            ("exported",   "Exported",               "--",  TEXT),
+            ("earnings",   "Export earnings",        "--",  TEAL),
+            ("avg_gen",    "7-day avg generation",   "--",  TEXT),
+            ("avg_export", "7-day avg export",       "--",  TEXT),
         ]
 
-        for i, (label, value, colour) in enumerate(stats):
+        for i, (key, label, value, colour) in enumerate(stat_keys):
             row = ctk.CTkFrame(card, fg_color=CARD)
-            row.pack(fill="x", padx=12, pady=(6 if i == 0 else 2, 2))
+            row.pack(fill="x", padx=12, pady=(4 if i == 0 else 1, 1))
             ctk.CTkLabel(
                 row, text=label,
                 font=ctk.CTkFont(size=11), text_color=MUTED
             ).pack(side="left")
-            ctk.CTkLabel(
+            ref = ctk.CTkLabel(
                 row, text=value,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 text_color=colour
-            ).pack(side="right")
+            )
+            ref.pack(side="right")
+            self._refs[key] = ref
 
             if i in (1, 3):
                 ctk.CTkFrame(
@@ -274,117 +279,228 @@ class SolarWidget(ctk.CTk):
         self._pad()
 
     def _build_forecast(self):
-        """3-day forecast + Tea time section."""
         SectionLabel(self.scroll, "Forecast").pack(
             anchor="w", padx=14, pady=(0, 4))
 
         forecast_days = [
-            ("☀️", "Today",    "Sunny, clear skies", "20"),
-            ("⛅", "Tomorrow", "Partly cloudy",       "10"),
-            ("🌧️", "Sunday",   "Rainy",               "5"),
+            ("--", "Today",    "--", "--"),
+            ("--", "Tomorrow", "--", "--"),
+            ("--", "Sunday",   "--", "--"),
         ]
 
-        for emoji, day, condition, kwh in forecast_days:
+        for i, (emoji, day, condition, kwh) in enumerate(forecast_days):
             card = Card(self.scroll)
             card.pack(fill="x", padx=10, pady=(0, 4))
 
             row = ctk.CTkFrame(card, fg_color=CARD)
-            row.pack(fill="x", padx=12, pady=8)
+            row.pack(fill="x", padx=12, pady=5)
 
-            ctk.CTkLabel(
-                row, text=emoji,
-                font=ctk.CTkFont(size=26)
-            ).pack(side="left")
+            icon = ctk.CTkLabel(
+                row, text=emoji, font=ctk.CTkFont(size=26))
+            icon.pack(side="left")
+            self._refs[f"fcast_icon_{i}"] = icon
 
             info = ctk.CTkFrame(row, fg_color=CARD)
             info.pack(side="left", padx=8)
-            ctk.CTkLabel(
+
+            day_label = ctk.CTkLabel(
                 info, text=day,
-                font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=TEXT
-            ).pack(anchor="w")
-            ctk.CTkLabel(
+                font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT)
+            day_label.pack(anchor="w")
+            self._refs[f"fcast_day_{i}"] = day_label
+
+            cond_label = ctk.CTkLabel(
                 info, text=condition,
-                font=ctk.CTkFont(size=11),
-                text_color=MUTED
-            ).pack(anchor="w")
+                font=ctk.CTkFont(size=11), text_color=MUTED)
+            cond_label.pack(anchor="w")
+            self._refs[f"fcast_cond_{i}"] = cond_label
 
             kwh_frame = ctk.CTkFrame(row, fg_color=CARD)
             kwh_frame.pack(side="right")
-            ctk.CTkLabel(
+
+            kwh_label = ctk.CTkLabel(
                 kwh_frame, text=kwh,
-                font=ctk.CTkFont(size=18, weight="bold"),
-                text_color=TEAL_DARK
-            ).pack(side="left")
+                font=ctk.CTkFont(size=18, weight="bold"), text_color=TEAL_DARK)
+            kwh_label.pack(side="left")
+            self._refs[f"fcast_kwh_{i}"] = kwh_label
+
             ctk.CTkLabel(
                 kwh_frame, text=" kWh",
-                font=ctk.CTkFont(size=11),
-                text_color=MUTED
+                font=ctk.CTkFont(size=11), text_color=MUTED
             ).pack(side="left", pady=(4, 0))
 
         # Tea time card
-        self._pad((0, 4))
+        self._pad(4)
         tea = Card(self.scroll)
         tea.pack(fill="x", padx=10, pady=(0, 12))
 
         header = ctk.CTkFrame(tea, fg_color=CARD)
         header.pack(fill="x", padx=12, pady=(8, 4))
         ctk.CTkLabel(
-            header, text="☕",
-            font=ctk.CTkFont(size=20)
+            header, text="☕", font=ctk.CTkFont(size=20)
         ).pack(side="left")
         title_frame = ctk.CTkFrame(header, fg_color=CARD)
         title_frame.pack(side="left", padx=8)
         ctk.CTkLabel(
             title_frame, text="Tea time",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=TEXT
+            font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT
         ).pack(anchor="w")
         ctk.CTkLabel(
-            title_frame, text="Best times to use energy today",
-            font=ctk.CTkFont(size=10),
-            text_color=MUTED
+            title_frame, text="Best times for a cuppa",
+            font=ctk.CTkFont(size=10), text_color=MUTED
         ).pack(anchor="w")
 
-        slots = [
-            ("☀️", "11:00 – 12:00", 0.95),
-            ("🌤️", "13:00 – 14:00", 0.80),
-            ("🌤️", "14:00 – 15:00", 0.65),
-        ]
-
-        for emoji, time_str, strength in slots:
+        self._refs["tea_slots"] = []
+        for j in range(3):
             slot = ctk.CTkFrame(
                 tea, fg_color=TEAL_LIGHT,
-                corner_radius=6,
-                border_width=1, border_color=TEAL_BORDER
+                corner_radius=6, border_width=1, border_color=TEAL_BORDER
             )
             slot.pack(fill="x", padx=12, pady=(0, 4))
 
             inner = ctk.CTkFrame(slot, fg_color=TEAL_LIGHT)
-            inner.pack(fill="x", padx=8, pady=5)
+            inner.pack(fill="x", padx=8, pady=6)
+            inner.columnconfigure(0, minsize=80)
+            inner.columnconfigure(1, weight=1)
+            inner.columnconfigure(2, minsize=70)
 
-            ctk.CTkLabel(
-                inner, text=emoji,
-                font=ctk.CTkFont(size=13)
-            ).pack(side="left")
-            ctk.CTkLabel(
-                inner, text=time_str,
+            time_lbl = ctk.CTkLabel(
+                inner, text="--",
                 font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=TEAL_DARK
-            ).pack(side="left", padx=6)
+                text_color=TEAL_DARK, anchor="w")
+            time_lbl.grid(row=0, column=0, sticky="w")
 
             bar_bg = ctk.CTkFrame(
-                inner, fg_color=TEAL_BORDER,
-                corner_radius=2, height=4
-            )
-            bar_bg.pack(side="right", fill="x", expand=True)
+                inner, fg_color=TEAL_BORDER, corner_radius=2, height=6)
+            bar_bg.grid(row=0, column=1, sticky="ew", padx=(4, 4))
             bar_fill = ctk.CTkFrame(
-                bar_bg, fg_color=TEAL,
-                corner_radius=2, height=4
-            )
-            bar_fill.place(relx=0, rely=0, relwidth=strength, relheight=1)
+                bar_bg, fg_color=TEAL, corner_radius=2, height=6)
+            bar_fill.place(relx=0, rely=0, relwidth=0.5, relheight=1)
+
+            kwh_lbl = ctk.CTkLabel(
+                inner, text="",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=TEAL_DARK, anchor="e")
+            kwh_lbl.grid(row=0, column=2, sticky="e")
+
+            self._refs["tea_slots"].append({
+                "time": time_lbl,
+                "bar":  bar_fill,
+                "kwh":  kwh_lbl,
+            })
 
         ctk.CTkFrame(tea, fg_color=CARD, height=4).pack()
+
+    # ------------------------------------------------------------------ #
+    # Live data update                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _update_ui(self):
+        if self.refresher:
+            snap    = self.refresher.snapshot()
+            live    = snap.get("live")
+            weather = snap.get("weather")
+            store   = snap.get("store", {})
+
+            # --- Weather ---
+            if weather and not weather.get("error"):
+                self._refs["weather_icon"].configure(
+                    text=weather["emoji"])
+                self._refs["temp"].configure(
+                    text=f"{weather['temperature']}°C")
+                self._refs["condition"].configure(
+                    text=f"{weather['description']} · "
+                         f"Wind {weather['wind_kph']} km/h")
+                self._refs["updated"].configure(
+                    text=f"Updated\n"
+                         f"{datetime.datetime.now().strftime('%H:%M')}")
+
+                # Forecast cards
+                days = weather.get("forecast", [])
+                for i, day in enumerate(days[:3]):
+                    est = round(day["sunshine_hrs"] * 0.85, 1)
+                    self._refs[f"fcast_icon_{i}"].configure(
+                        text=day["emoji"])
+                    self._refs[f"fcast_day_{i}"].configure(
+                        text=["Today", "Tomorrow"][i] if i < 2 else
+                        (datetime.datetime.now() +
+                         datetime.timedelta(days=2)).strftime("%A"))
+                    self._refs[f"fcast_cond_{i}"].configure(
+                        text=day["description"])
+                    self._refs[f"fcast_kwh_{i}"].configure(
+                        text=str(est))
+
+                # Tea time
+                forecast = weather.get("forecast", [])
+                if forecast:
+                    self._update_tea_time(forecast[0])
+
+            # --- Live data ---
+            if live:
+                self._refs["pv_power"].configure(
+                    text=f"{live['pv_power_kw']}")
+                self._refs["generated"].configure(
+                    text=f"{live['pv_day_kwh']} kWh")
+                self._refs["load_pct"].configure(
+                    text=f"{live['load_satisfied_pct']}%")
+
+            # --- Store ---
+            if store:
+                earnings = store.get("cumulative_export_earnings_gbp", 0.0)
+                self._refs["earnings"].configure(text=f"£{earnings:.2f}")
+                best = store.get("best_hour_kwh", 0.0)
+                self._refs["best_hour"].configure(
+                    text=f"{best:.2f}" if best else "--")
+
+        self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
+
+    def _update_tea_time(self, today_forecast):
+        """
+        Show best 3 remaining hours today based on expected generation.
+        Bar represents % of peak system capacity (3.09kW = 3.09kWh max/hour).
+        """
+        now = datetime.datetime.now().hour
+        sunshine = today_forecast.get("sunshine_hrs", 0)
+        peak_kw = 3.09
+
+        remaining = []
+        for hour in range(now, 20):
+            dist = abs(hour - 13)
+            weight = max(0, 1 - (dist / 7))
+            est_kwh = round(weight * (sunshine / 8) * peak_kw, 2)
+            if est_kwh > 0.1:
+                remaining.append((hour, est_kwh))
+
+        top3 = sorted(remaining, key=lambda x: -x[1])[:3]
+        top3.sort(key=lambda x: x[0])
+
+        def fmt(h):
+            suffix = "am" if h < 12 else "pm"
+            h12 = h if h <= 12 else h - 12
+            return f"{h12}{suffix}"
+
+        if not top3:
+            for slot_refs in self._refs["tea_slots"]:
+                slot_refs["time"].configure(text="No significant generation remaining")
+                slot_refs["bar"].place(relwidth=0)
+                slot_refs["kwh"].configure(text="")
+            return
+
+        for j, slot_refs in enumerate(self._refs["tea_slots"]):
+            if j < len(top3):
+                hour, est_kwh = top3[j]
+                pct = min(1.0, est_kwh / peak_kw)
+                slot_refs["time"].configure(text=f"{fmt(hour)} – {fmt(hour+1)}")
+                slot_refs["bar"].place(relx=0, rely=0, relwidth=pct, relheight=1)
+                slot_refs["kwh"].configure(text=f"~{est_kwh} kWh")
+            else:
+                slot_refs["time"].configure(text="")
+                slot_refs["bar"].place(relwidth=0)
+                slot_refs["kwh"].configure(text="")
+
+    # ------------------------------------------------------------------ #
+    # Toggle handlers                                                      #
+    # ------------------------------------------------------------------ #
 
     def _show_today(self):
         self.btn_today.configure(
@@ -401,6 +517,10 @@ class SolarWidget(ctk.CTk):
         self.btn_today.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
+
+    # ------------------------------------------------------------------ #
+    # Windows always-on-bottom                                            #
+    # ------------------------------------------------------------------ #
 
     def _push_to_bottom(self):
         try:
