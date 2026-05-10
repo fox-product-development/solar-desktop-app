@@ -65,12 +65,11 @@ class LongTermPanel:
         self.is_open = False
         self._animating = False
 
-        # Use plain Toplevel, withdrawn until opened
         self.win = tk.Toplevel(main_widget)
         self.win.overrideredirect(True)
         self.win.attributes("-alpha", 0.95)
         self.win.configure(bg=BG)
-        self.win.withdraw()  # hide completely until toggled open
+        self.win.withdraw()
 
         self._build_content()
 
@@ -84,7 +83,6 @@ class LongTermPanel:
         return open_x, closed_x, realtime_y, panel_h
 
     def _build_content(self):
-        # Period selector chips
         chip_frame = tk.Frame(self.win, bg=BG)
         chip_frame.pack(fill="x", padx=10, pady=(12, 6))
 
@@ -106,7 +104,6 @@ class LongTermPanel:
             btn.pack(side="left", padx=(0, 3))
             self._chip_btns[period] = btn
 
-        # Navigation arrows
         nav = ctk.CTkFrame(self.win, fg_color=BG)
         nav.pack(fill="x", padx=10, pady=(0, 8))
         nav.columnconfigure(1, weight=1)
@@ -135,7 +132,6 @@ class LongTermPanel:
             command=self._next_period
         ).grid(row=0, column=2)
 
-        # Stats card
         card = Card(self.win)
         card.pack(fill="x", padx=10, pady=(0, 8))
 
@@ -229,7 +225,6 @@ class LongTermPanel:
         self._animating = True
         self.is_open = True
         open_x, closed_x, realtime_y, panel_h = self._get_positions()
-        # Position at closed_x before showing
         self.win.geometry(f"{self.PANEL_WIDTH}x{panel_h}+{closed_x}+{realtime_y}")
         self.win.deiconify()
         self._push_to_bottom()
@@ -242,7 +237,6 @@ class LongTermPanel:
         open_x, closed_x, realtime_y, panel_h = self._get_positions()
         step = (closed_x - open_x) / self.SLIDE_STEPS
         self._animate(open_x, closed_x, step, realtime_y, panel_h)
-        # withdraw after animation completes handled in _animate
 
     def _animate(self, current_x, target_x, step, y, h):
         current_x += step
@@ -272,7 +266,6 @@ class LongTermPanel:
                 win32con.SWP_NOACTIVATE)
         except Exception:
             pass
-        # Only repeat if panel is open
         if self.is_open:
             self.win.after(1000, self._push_to_bottom)
 
@@ -286,7 +279,7 @@ class SolarWidget(ctk.CTk):
 
         self.refresher = refresher
         self._refs = {}
-        self.realtime_y_offset = 265
+        self.realtime_y_offset = 230
         self.realtime_section_height = 280
         self.lt_panel = None
 
@@ -329,11 +322,9 @@ class SolarWidget(ctk.CTk):
         self._build_tab_button()
 
     def _build_tab_button(self):
-        """Teal tab on the outer left edge of the widget."""
         tab_w = 15
         tab_h = 120
 
-        # Use a frame as the tab background
         tab_frame = tk.Frame(
             self,
             width=tab_w,
@@ -344,7 +335,6 @@ class SolarWidget(ctk.CTk):
         tab_frame.place(x=0, y=self.realtime_y_offset)
         tab_frame.tkraise()
 
-        # Vertical text using a label with writing direction
         tab_lbl = tk.Label(
             tab_frame,
             text="L\nO\nN\nG\n\nT\nE\nR\nM",
@@ -511,42 +501,6 @@ class SolarWidget(ctk.CTk):
                     card, fg_color=BORDER, height=1
                 ).pack(fill="x", padx=12, pady=2)
 
-        ctk.CTkLabel(
-            card, text="7-day hourly profile",
-            font=ctk.CTkFont(size=11), text_color=MUTED
-        ).pack(anchor="w", padx=12, pady=(6, 4))
-
-        chart_frame = ctk.CTkFrame(card, fg_color=CARD, corner_radius=6)
-        chart_frame.pack(fill="x", padx=12, pady=(0, 10))
-
-        fig = Figure(figsize=(2.5, 0.6), dpi=100)
-        fig.patch.set_facecolor("#ffffff")
-        ax = fig.add_subplot(111)
-        ax.set_facecolor("#f2f4f3")
-
-        hours  = list(range(24))
-        values = [0,0,0,0,0,0,0,0.1,0.4,0.9,1.4,1.8,2.1,1.9,1.6,1.2,0.7,0.3,0.1,0,0,0,0,0]
-
-        ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.85)
-        ax.set_xlim(-0.5, 23.5)
-        ax.set_ylim(0, 3.2)
-        ax.set_xticks([0, 6, 12, 18, 23])
-        ax.set_xticklabels(["00:00", "06:00", "12:00", "18:00", "23:00"],
-                           fontsize=7, color="#8aa8a2")
-        ax.set_yticks([])
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_visible(False)
-        ax.spines["bottom"].set_color("#dde8e5")
-        ax.tick_params(axis="x", length=0)
-        fig.tight_layout(pad=0.3)
-
-        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="x")
-        self._refs["chart_ax"] = ax
-        self._refs["chart_canvas"] = canvas
-
         self._pad()
 
     def _build_forecast(self):
@@ -599,9 +553,10 @@ class SolarWidget(ctk.CTk):
                 font=ctk.CTkFont(size=11), text_color=MUTED
             ).pack(side="left", pady=(4, 0))
 
+        # Tea time card
         self._pad(4)
         tea = Card(self.scroll)
-        tea.pack(fill="x", padx=10, pady=(0, 12))
+        tea.pack(fill="x", padx=10, pady=(0, 6))
 
         header = ctk.CTkFrame(tea, fg_color=CARD)
         header.pack(fill="x", padx=12, pady=(8, 4))
@@ -655,7 +610,38 @@ class SolarWidget(ctk.CTk):
                 "kwh":  kwh_lbl,
             })
 
-        ctk.CTkFrame(tea, fg_color=CARD, height=4).pack()
+        # Today's generation forecast chart — inside tea time card
+        chart_frame = ctk.CTkFrame(tea, fg_color=CARD, corner_radius=6)
+        chart_frame.pack(fill="x", padx=12, pady=(10, 10))
+
+        fig = Figure(figsize=(2.5, 1), dpi=100)
+        fig.patch.set_facecolor("#ffffff")
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#f2f4f3")
+
+        # Placeholder — will be replaced with weather-based forecast
+        hours  = list(range(24))
+        values = [0]*24
+
+        ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.85)
+        ax.set_xlim(-0.5, 23.5)
+        ax.set_ylim(0, 3.2)
+        ax.set_xticks([0, 6, 12, 18, 23])
+        ax.set_xticklabels(["00:00", "06:00", "12:00", "18:00", "23:00"],
+                           fontsize=7, color="#8aa8a2")
+        ax.set_yticks([])
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.spines["bottom"].set_color("#dde8e5")
+        ax.tick_params(axis="x", length=0)
+        fig.tight_layout(pad=0.3)
+
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="x")
+        self._refs["chart_ax"] = ax
+        self._refs["chart_canvas"] = canvas
 
     # ------------------------------------------------------------------ #
     # Live data update                                                     #
@@ -690,6 +676,7 @@ class SolarWidget(ctk.CTk):
                 forecast = weather.get("forecast", [])
                 if forecast:
                     self._update_tea_time(forecast[0])
+                    self._update_forecast_chart(forecast[0])
 
             if live:
                 self._refs["pv_power"].configure(text=f"{live['pv_power_kw']}")
@@ -705,7 +692,55 @@ class SolarWidget(ctk.CTk):
                 if self.lt_panel:
                     self.lt_panel.update_data(store)
 
+                history = store.get("daily_history", [])
+                if history:
+                    n = len(history)
+                    avg_gen  = sum(d["generation_kwh"] for d in history) / n
+                    avg_exp  = sum(d["export_kwh"] for d in history) / n
+                    avg_earn = avg_exp * config.OCTOPUS_SEG_RATE
+                    self._refs["avg_gen"].configure(text=f"{avg_gen:.1f} kWh")
+                    self._refs["avg_export"].configure(
+                        text=f"{avg_exp:.1f} kWh · £{avg_earn:.2f}")
+
         self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
+
+    def _update_forecast_chart(self, today_forecast):
+        """Update the chart with today's hourly generation forecast."""
+        sunshine = today_forecast.get("sunshine_hrs", 0)
+        peak_kw  = 3.09
+
+        values = []
+        for hour in range(24):
+            dist    = abs(hour - 13)
+            weight  = max(0, 1 - (dist / 7))
+            est_kwh = round(weight * (sunshine / 8) * peak_kw, 2)
+            values.append(est_kwh)
+
+        ax     = self._refs["chart_ax"]
+        canvas = self._refs["chart_canvas"]
+
+        ax.cla()
+        ax.set_facecolor("#f2f4f3")
+
+        # Highlight past hours slightly dimmer
+        now = datetime.datetime.now().hour
+        colors = ["#3ec9b6" if h >= now else "#a8e8dc" for h in range(24)]
+
+        ax.bar(range(24), values, color=colors, width=0.8, alpha=0.85)
+        ax.set_xlim(-0.5, 23.5)
+        ax.set_ylim(0, 3.2)
+        ax.set_xticks([0, 6, 12, 18, 23])
+        ax.set_xticklabels(["00:00", "06:00", "12:00", "18:00", "23:00"],
+                           fontsize=7, color="#8aa8a2")
+        ax.set_yticks([])
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.spines["bottom"].set_color("#dde8e5")
+        ax.tick_params(axis="x", length=0)
+        ax.figure.tight_layout(pad=0.3)
+
+        canvas.draw()
 
     def _update_tea_time(self, today_forecast):
         now      = datetime.datetime.now().hour
