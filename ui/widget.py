@@ -1,5 +1,6 @@
 # ui/widget.py
 import datetime
+import tkinter as tk
 import customtkinter as ctk
 import ctypes
 import sys
@@ -54,6 +55,228 @@ class SectionLabel(ctk.CTkLabel):
         )
 
 
+class LongTermPanel:
+    PANEL_WIDTH = 210
+    SLIDE_STEPS = 15
+    SLIDE_DELAY = 10
+
+    def __init__(self, main_widget):
+        self.main = main_widget
+        self.is_open = False
+        self._animating = False
+
+        # Use plain Toplevel, withdrawn until opened
+        self.win = tk.Toplevel(main_widget)
+        self.win.overrideredirect(True)
+        self.win.attributes("-alpha", 0.95)
+        self.win.configure(bg=BG)
+        self.win.withdraw()  # hide completely until toggled open
+
+        self._build_content()
+
+    def _get_positions(self):
+        main_x     = self.main.winfo_x()
+        main_y     = self.main.winfo_y()
+        realtime_y = main_y + self.main.realtime_y_offset
+        open_x     = main_x - self.PANEL_WIDTH
+        closed_x   = main_x
+        panel_h    = self.main.realtime_section_height
+        return open_x, closed_x, realtime_y, panel_h
+
+    def _build_content(self):
+        # Period selector chips
+        chip_frame = tk.Frame(self.win, bg=BG)
+        chip_frame.pack(fill="x", padx=10, pady=(12, 6))
+
+        self._period = tk.StringVar(value="Year")
+        self._chip_btns = {}
+        for period in ["Week", "Month", "Year", "Lifetime"]:
+            btn = ctk.CTkButton(
+                chip_frame, text=period,
+                width=44, height=24,
+                font=ctk.CTkFont(size=10),
+                corner_radius=4,
+                fg_color=TEAL if period == "Year" else CARD,
+                text_color="white" if period == "Year" else MUTED,
+                border_color=TEAL if period == "Year" else BORDER,
+                border_width=1,
+                hover_color=TEAL_LIGHT,
+                command=lambda p=period: self._select_period(p)
+            )
+            btn.pack(side="left", padx=(0, 3))
+            self._chip_btns[period] = btn
+
+        # Navigation arrows
+        nav = ctk.CTkFrame(self.win, fg_color=BG)
+        nav.pack(fill="x", padx=10, pady=(0, 8))
+        nav.columnconfigure(1, weight=1)
+
+        ctk.CTkButton(
+            nav, text="‹", width=24, height=24,
+            font=ctk.CTkFont(size=16),
+            fg_color=CARD, text_color=MUTED,
+            border_color=BORDER, border_width=1,
+            corner_radius=5, hover_color=TEAL_LIGHT,
+            command=self._prev_period
+        ).grid(row=0, column=0)
+
+        self._period_label = ctk.CTkLabel(
+            nav, text="2026",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=TEXT)
+        self._period_label.grid(row=0, column=1)
+
+        ctk.CTkButton(
+            nav, text="›", width=24, height=24,
+            font=ctk.CTkFont(size=16),
+            fg_color=CARD, text_color=MUTED,
+            border_color=BORDER, border_width=1,
+            corner_radius=5, hover_color=TEAL_LIGHT,
+            command=self._next_period
+        ).grid(row=0, column=2)
+
+        # Stats card
+        card = Card(self.win)
+        card.pack(fill="x", padx=10, pady=(0, 8))
+
+        self._lt_refs = {}
+        stats = [
+            ("lt_gen",      "Total generation", "--", TEAL),
+            ("lt_export",   "Total export",     "--", TEXT),
+            ("lt_earnings", "Export earnings",  "--", TEAL),
+        ]
+
+        for i, (key, label, value, colour) in enumerate(stats):
+            ctk.CTkLabel(
+                card, text=label,
+                font=ctk.CTkFont(size=11), text_color=MUTED
+            ).pack(anchor="w", padx=12, pady=(8 if i == 0 else 2, 0))
+            val_lbl = ctk.CTkLabel(
+                card, text=value,
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color=colour)
+            val_lbl.pack(anchor="w", padx=12, pady=(0, 4))
+            self._lt_refs[key] = val_lbl
+
+            if i < 2:
+                ctk.CTkFrame(
+                    card, fg_color=BORDER, height=1
+                ).pack(fill="x", padx=12, pady=2)
+
+        ctk.CTkFrame(card, fg_color=BORDER, height=1).pack(
+            fill="x", padx=12, pady=2)
+        ctk.CTkLabel(
+            card, text="Payoff progress",
+            font=ctk.CTkFont(size=11), text_color=MUTED
+        ).pack(anchor="w", padx=12, pady=(4, 2))
+
+        progress_bg = ctk.CTkFrame(
+            card, fg_color="#e8eeec", corner_radius=3, height=6)
+        progress_bg.pack(fill="x", padx=12, pady=(0, 4))
+        self._lt_refs["roi_bar"] = ctk.CTkFrame(
+            progress_bg, fg_color=TEAL, corner_radius=3, height=6)
+        self._lt_refs["roi_bar"].place(
+            relx=0, rely=0, relwidth=0.01, relheight=1)
+
+        self._lt_refs["roi_label"] = ctk.CTkLabel(
+            card, text="Set install cost to track payoff",
+            font=ctk.CTkFont(size=10), text_color=MUTED)
+        self._lt_refs["roi_label"].pack(
+            anchor="w", padx=12, pady=(0, 8))
+
+    def _select_period(self, period):
+        self._period.set(period)
+        for p, btn in self._chip_btns.items():
+            if p == period:
+                btn.configure(fg_color=TEAL, text_color="white", border_color=TEAL)
+            else:
+                btn.configure(fg_color=CARD, text_color=MUTED, border_color=BORDER)
+
+    def _prev_period(self):
+        pass
+
+    def _next_period(self):
+        pass
+
+    def update_data(self, store):
+        if not store:
+            return
+        history    = store.get("daily_history", [])
+        total_gen  = sum(d["generation_kwh"] for d in history)
+        total_exp  = sum(d["export_kwh"] for d in history)
+        total_earn = store.get("cumulative_export_earnings_gbp", 0.0)
+
+        self._lt_refs["lt_gen"].configure(text=f"{total_gen:.1f} kWh")
+        self._lt_refs["lt_export"].configure(text=f"{total_exp:.1f} kWh")
+        self._lt_refs["lt_earnings"].configure(text=f"£{total_earn:.2f}")
+
+        payoff = store.get("install_cost_gbp")
+        if payoff:
+            pct = min(1.0, total_earn / payoff)
+            self._lt_refs["roi_bar"].place(relwidth=pct)
+            self._lt_refs["roi_label"].configure(
+                text=f"£{total_earn:.2f} of £{payoff:.0f} · {pct*100:.1f}%")
+
+    def toggle(self):
+        if self._animating:
+            return
+        if self.is_open:
+            self._slide_close()
+        else:
+            self._slide_open()
+
+    def _slide_open(self):
+        self._animating = True
+        self.is_open = True
+        open_x, closed_x, realtime_y, panel_h = self._get_positions()
+        # Position at closed_x before showing
+        self.win.geometry(f"{self.PANEL_WIDTH}x{panel_h}+{closed_x}+{realtime_y}")
+        self.win.deiconify()
+        self._push_to_bottom()
+        step = (open_x - closed_x) / self.SLIDE_STEPS
+        self._animate(closed_x, open_x, step, realtime_y, panel_h)
+
+    def _slide_close(self):
+        self._animating = True
+        self.is_open = False
+        open_x, closed_x, realtime_y, panel_h = self._get_positions()
+        step = (closed_x - open_x) / self.SLIDE_STEPS
+        self._animate(open_x, closed_x, step, realtime_y, panel_h)
+        # withdraw after animation completes handled in _animate
+
+    def _animate(self, current_x, target_x, step, y, h):
+        current_x += step
+        done = (step > 0 and current_x >= target_x) or \
+               (step < 0 and current_x <= target_x)
+        x = target_x if done else int(current_x)
+        self.win.geometry(f"{self.PANEL_WIDTH}x{h}+{x}+{y}")
+        if done:
+            self._animating = False
+            if not self.is_open:
+                self.win.withdraw()
+        else:
+            self.win.after(
+                self.SLIDE_DELAY,
+                lambda: self._animate(current_x, target_x, step, y, h))
+
+    def _push_to_bottom(self):
+        try:
+            import win32gui
+            import win32con
+            hwnd = ctypes.windll.user32.GetParent(self.win.winfo_id())
+            if not hwnd:
+                hwnd = self.win.winfo_id()
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                win32con.SWP_NOACTIVATE)
+        except Exception:
+            pass
+        # Only repeat if panel is open
+        if self.is_open:
+            self.win.after(1000, self._push_to_bottom)
+
+
 class SolarWidget(ctk.CTk):
 
     def __init__(self, refresher=None):
@@ -63,14 +286,15 @@ class SolarWidget(ctk.CTk):
 
         self.refresher = refresher
         self._refs = {}
+        self.realtime_y_offset = 265
+        self.realtime_section_height = 280
+        self.lt_panel = None
 
-        # --- Window behaviour ---
         self.overrideredirect(True)
         self.attributes("-topmost", False)
         self.attributes("-alpha", 0.95)
         self.configure(fg_color=BG)
 
-        # --- Size and position ---
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         self.widget_w = 300
@@ -79,7 +303,6 @@ class SolarWidget(ctk.CTk):
         y = 0
         self.geometry(f"{self.widget_w}x{self.widget_h}+{x}+{y}")
 
-        # --- Scrollable main container ---
         self.scroll = ctk.CTkScrollableFrame(
             self,
             fg_color=BG,
@@ -88,20 +311,58 @@ class SolarWidget(ctk.CTk):
         )
         self.scroll.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # --- Build sections ---
         self._build_header()
         self._build_realtime()
         self._build_daily()
         self._build_forecast()
 
-        # --- Start live update loop ---
         self.after(1000, self._update_ui)
-
-        # --- Push to bottom of Z-order ---
+        self.after(800, self._init_long_term_panel)
         self.after(200, self._push_to_bottom)
 
     def _pad(self, height=4):
         ctk.CTkFrame(self.scroll, fg_color=BG, height=height).pack(fill="x")
+
+    def _init_long_term_panel(self):
+        self.update_idletasks()
+        self.lt_panel = LongTermPanel(self)
+        self._build_tab_button()
+
+    def _build_tab_button(self):
+        """Teal tab on the outer left edge of the widget."""
+        tab_w = 15
+        tab_h = 120
+
+        # Use a frame as the tab background
+        tab_frame = tk.Frame(
+            self,
+            width=tab_w,
+            height=tab_h,
+            bg=TEAL,
+            cursor="hand2"
+        )
+        tab_frame.place(x=0, y=self.realtime_y_offset)
+        tab_frame.tkraise()
+
+        # Vertical text using a label with writing direction
+        tab_lbl = tk.Label(
+            tab_frame,
+            text="L\nO\nN\nG\n\nT\nE\nR\nM",
+            bg=TEAL,
+            fg="white",
+            font=("Segoe UI", 6, "bold"),
+            cursor="hand2",
+            justify="center"
+        )
+        tab_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+        tab_frame.bind("<Button-1>", lambda e: self._toggle_lt_panel())
+        tab_lbl.bind("<Button-1>", lambda e: self._toggle_lt_panel())
+        self._tab_frame = tab_frame
+
+    def _toggle_lt_panel(self):
+        if self.lt_panel:
+            self.lt_panel.toggle()
 
     # ------------------------------------------------------------------ #
     # Layout builders                                                      #
@@ -123,9 +384,7 @@ class SolarWidget(ctk.CTk):
         row.pack(fill="x", padx=10, pady=1)
 
         self._refs["weather_icon"] = ctk.CTkLabel(
-            row, text="--",
-            font=ctk.CTkFont(size=24), text_color=TEXT
-        )
+            row, text="--", font=ctk.CTkFont(size=24), text_color=TEXT)
         self._refs["weather_icon"].pack(side="left")
 
         temp_frame = ctk.CTkFrame(row, fg_color=CARD)
@@ -133,20 +392,17 @@ class SolarWidget(ctk.CTk):
 
         self._refs["temp"] = ctk.CTkLabel(
             temp_frame, text="--°C",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT
-        )
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT)
         self._refs["temp"].pack(anchor="w")
 
         self._refs["condition"] = ctk.CTkLabel(
             temp_frame, text="Loading...",
-            font=ctk.CTkFont(size=10), text_color=MUTED
-        )
+            font=ctk.CTkFont(size=10), text_color=MUTED)
         self._refs["condition"].pack(anchor="w")
 
         self._refs["updated"] = ctk.CTkLabel(
             row, text="Updated\n--:--",
-            font=ctk.CTkFont(size=10), text_color=MUTED, justify="right"
-        )
+            font=ctk.CTkFont(size=10), text_color=MUTED, justify="right")
         self._refs["updated"].pack(side="right")
 
         self._pad()
@@ -161,7 +417,6 @@ class SolarWidget(ctk.CTk):
         row = ctk.CTkFrame(card, fg_color=CARD)
         row.pack(fill="x", padx=12, pady=10)
 
-        # Current generation
         left = ctk.CTkFrame(row, fg_color=CARD)
         left.pack(side="left")
         ctk.CTkLabel(
@@ -172,15 +427,13 @@ class SolarWidget(ctk.CTk):
         gen_row.pack(anchor="w")
         self._refs["pv_power"] = ctk.CTkLabel(
             gen_row, text="--",
-            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEAL
-        )
+            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEAL)
         self._refs["pv_power"].pack(side="left")
         ctk.CTkLabel(
             gen_row, text=" kW",
             font=ctk.CTkFont(size=12), text_color=MUTED
         ).pack(side="left", pady=(6, 0))
 
-        # Best hour ever
         right = ctk.CTkFrame(row, fg_color=CARD)
         right.pack(side="right")
         ctk.CTkLabel(
@@ -191,8 +444,7 @@ class SolarWidget(ctk.CTk):
         bh_row.pack(anchor="e")
         self._refs["best_hour"] = ctk.CTkLabel(
             bh_row, text="--",
-            font=ctk.CTkFont(size=20, weight="bold"), text_color=AMBER
-        )
+            font=ctk.CTkFont(size=20, weight="bold"), text_color=AMBER)
         self._refs["best_hour"].pack(side="left")
         ctk.CTkLabel(
             bh_row, text=" kWh",
@@ -202,7 +454,6 @@ class SolarWidget(ctk.CTk):
         self._pad()
 
     def _build_daily(self):
-        # Toggle buttons
         tog = ctk.CTkFrame(self.scroll, fg_color=BG)
         tog.pack(fill="x", padx=10, pady=(0, 6))
         tog.columnconfigure(0, weight=1)
@@ -228,7 +479,6 @@ class SolarWidget(ctk.CTk):
         )
         self.btn_week.grid(row=0, column=1, padx=(2, 0), sticky="ew")
 
-        # Stats card
         card = Card(self.scroll)
         card.pack(fill="x", padx=10, pady=(0, 4))
 
@@ -261,14 +511,12 @@ class SolarWidget(ctk.CTk):
                     card, fg_color=BORDER, height=1
                 ).pack(fill="x", padx=12, pady=2)
 
-        # 7-day hourly profile chart
         ctk.CTkLabel(
             card, text="7-day hourly profile",
             font=ctk.CTkFont(size=11), text_color=MUTED
         ).pack(anchor="w", padx=12, pady=(6, 4))
 
-        chart_frame = ctk.CTkFrame(
-            card, fg_color=CARD, corner_radius=6)
+        chart_frame = ctk.CTkFrame(card, fg_color=CARD, corner_radius=6)
         chart_frame.pack(fill="x", padx=12, pady=(0, 10))
 
         fig = Figure(figsize=(2.5, 0.6), dpi=100)
@@ -276,8 +524,7 @@ class SolarWidget(ctk.CTk):
         ax = fig.add_subplot(111)
         ax.set_facecolor("#f2f4f3")
 
-        # Placeholder data — will be replaced with real 7-day averages
-        hours = list(range(24))
+        hours  = list(range(24))
         values = [0,0,0,0,0,0,0,0.1,0.4,0.9,1.4,1.8,2.1,1.9,1.6,1.2,0.7,0.3,0.1,0,0,0,0,0]
 
         ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.85)
@@ -319,8 +566,7 @@ class SolarWidget(ctk.CTk):
             row = ctk.CTkFrame(card, fg_color=CARD)
             row.pack(fill="x", padx=12, pady=5)
 
-            icon = ctk.CTkLabel(
-                row, text=emoji, font=ctk.CTkFont(size=26))
+            icon = ctk.CTkLabel(row, text=emoji, font=ctk.CTkFont(size=26))
             icon.pack(side="left")
             self._refs[f"fcast_icon_{i}"] = icon
 
@@ -353,16 +599,13 @@ class SolarWidget(ctk.CTk):
                 font=ctk.CTkFont(size=11), text_color=MUTED
             ).pack(side="left", pady=(4, 0))
 
-        # Tea time card
         self._pad(4)
         tea = Card(self.scroll)
         tea.pack(fill="x", padx=10, pady=(0, 12))
 
         header = ctk.CTkFrame(tea, fg_color=CARD)
         header.pack(fill="x", padx=12, pady=(8, 4))
-        ctk.CTkLabel(
-            header, text="☕", font=ctk.CTkFont(size=20)
-        ).pack(side="left")
+        ctk.CTkLabel(header, text="☕", font=ctk.CTkFont(size=20)).pack(side="left")
         title_frame = ctk.CTkFrame(header, fg_color=CARD)
         title_frame.pack(side="left", padx=8)
         ctk.CTkLabel(
@@ -378,8 +621,7 @@ class SolarWidget(ctk.CTk):
         for j in range(3):
             slot = ctk.CTkFrame(
                 tea, fg_color=TEAL_LIGHT,
-                corner_radius=6, border_width=1, border_color=TEAL_BORDER
-            )
+                corner_radius=6, border_width=1, border_color=TEAL_BORDER)
             slot.pack(fill="x", padx=12, pady=(0, 4))
 
             inner = ctk.CTkFrame(slot, fg_color=TEAL_LIGHT)
@@ -426,71 +668,54 @@ class SolarWidget(ctk.CTk):
             weather = snap.get("weather")
             store   = snap.get("store", {})
 
-            # --- Weather ---
             if weather and not weather.get("error"):
-                self._refs["weather_icon"].configure(
-                    text=weather["emoji"])
-                self._refs["temp"].configure(
-                    text=f"{weather['temperature']}°C")
+                self._refs["weather_icon"].configure(text=weather["emoji"])
+                self._refs["temp"].configure(text=f"{weather['temperature']}°C")
                 self._refs["condition"].configure(
-                    text=f"{weather['description']} · "
-                         f"Wind {weather['wind_kph']} km/h")
+                    text=f"{weather['description']} · Wind {weather['wind_kph']} km/h")
                 self._refs["updated"].configure(
-                    text=f"Updated\n"
-                         f"{datetime.datetime.now().strftime('%H:%M')}")
+                    text=f"Updated\n{datetime.datetime.now().strftime('%H:%M')}")
 
-                # Forecast cards
                 days = weather.get("forecast", [])
                 for i, day in enumerate(days[:3]):
                     est = round(day["sunshine_hrs"] * 0.85, 1)
-                    self._refs[f"fcast_icon_{i}"].configure(
-                        text=day["emoji"])
+                    self._refs[f"fcast_icon_{i}"].configure(text=day["emoji"])
                     self._refs[f"fcast_day_{i}"].configure(
                         text=["Today", "Tomorrow"][i] if i < 2 else
                         (datetime.datetime.now() +
                          datetime.timedelta(days=2)).strftime("%A"))
-                    self._refs[f"fcast_cond_{i}"].configure(
-                        text=day["description"])
-                    self._refs[f"fcast_kwh_{i}"].configure(
-                        text=str(est))
+                    self._refs[f"fcast_cond_{i}"].configure(text=day["description"])
+                    self._refs[f"fcast_kwh_{i}"].configure(text=str(est))
 
-                # Tea time
                 forecast = weather.get("forecast", [])
                 if forecast:
                     self._update_tea_time(forecast[0])
 
-            # --- Live data ---
             if live:
-                self._refs["pv_power"].configure(
-                    text=f"{live['pv_power_kw']}")
-                self._refs["generated"].configure(
-                    text=f"{live['pv_day_kwh']} kWh")
-                self._refs["load_pct"].configure(
-                    text=f"{live['load_satisfied_pct']}%")
+                self._refs["pv_power"].configure(text=f"{live['pv_power_kw']}")
+                self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
+                self._refs["load_pct"].configure(text=f"{live['load_satisfied_pct']}%")
 
-            # --- Store ---
             if store:
                 earnings = store.get("cumulative_export_earnings_gbp", 0.0)
                 self._refs["earnings"].configure(text=f"£{earnings:.2f}")
                 best = store.get("best_hour_kwh", 0.0)
                 self._refs["best_hour"].configure(
                     text=f"{best:.2f}" if best else "--")
+                if self.lt_panel:
+                    self.lt_panel.update_data(store)
 
         self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
 
     def _update_tea_time(self, today_forecast):
-        """
-        Show best 3 remaining hours today based on expected generation.
-        Bar represents % of peak system capacity (3.09kW = 3.09kWh max/hour).
-        """
-        now = datetime.datetime.now().hour
+        now      = datetime.datetime.now().hour
         sunshine = today_forecast.get("sunshine_hrs", 0)
-        peak_kw = 3.09
+        peak_kw  = 3.09
 
         remaining = []
         for hour in range(now, 20):
-            dist = abs(hour - 13)
-            weight = max(0, 1 - (dist / 7))
+            dist    = abs(hour - 13)
+            weight  = max(0, 1 - (dist / 7))
             est_kwh = round(weight * (sunshine / 8) * peak_kw, 2)
             if est_kwh > 0.1:
                 remaining.append((hour, est_kwh))
@@ -553,13 +778,9 @@ class SolarWidget(ctk.CTk):
             hwnd = _hwnd(self)
             if hwnd:
                 win32gui.SetWindowPos(
-                    hwnd,
-                    win32con.HWND_BOTTOM,
-                    0, 0, 0, 0,
-                    win32con.SWP_NOMOVE |
-                    win32con.SWP_NOSIZE |
-                    win32con.SWP_NOACTIVATE
-                )
+                    hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                    win32con.SWP_NOACTIVATE)
         except Exception:
             pass
         self.after(1000, self._push_to_bottom)
