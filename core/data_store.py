@@ -45,12 +45,11 @@ def _save(data):
         log.error("Could not write %s: %s", config.DATA_FILE, exc)
 
 def _rate_for_date(date_str, rates):
-    """Return the export rate in £/kWh that was active on a given date."""
     for rate in reversed(rates):
         if date_str >= rate["start_date"]:
             if rate["end_date"] is None or date_str <= rate["end_date"]:
                 return rate["value"]
-    return 0.12  # fallback
+    return 0.12
 
 def get_all():
     return _load()
@@ -74,9 +73,7 @@ def update_best_hour(kwh):
         log.info("New best hour: %.3f kWh", kwh)
 
 def add_rate(value, start_date, end_date=None):
-    """Add a new export rate period."""
     data = _load()
-    # Close off the current open rate
     for rate in data["rates"]:
         if rate["end_date"] is None:
             rate["end_date"] = start_date
@@ -109,7 +106,6 @@ def update_daily(date_str, generation_kwh, export_kwh, import_kwh):
         history.append(record)
         history.sort(key=lambda d: d["date"])
 
-    # Recompute cumulative totals from scratch
     data["cumulative_export_kwh"] = round(
         sum(d["export_kwh"] for d in history), 3)
     data["cumulative_export_earnings_gbp"] = round(
@@ -140,15 +136,52 @@ def get_payoff_progress():
         "percent_complete": round(pct, 2),
     }
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    print("Testing data store...")
+def get_period_totals(period="day", reference_date=None):
+    if reference_date is None:
+        reference_date = datetime.date.today()
 
-    update_daily("2026-05-07", generation_kwh=8.2,  export_kwh=5.1,  import_kwh=1.2)
-    update_daily("2026-05-08", generation_kwh=14.3, export_kwh=9.8,  import_kwh=0.4)
-    update_daily("2026-05-09", generation_kwh=10.1, export_kwh=6.2,  import_kwh=0.8)
-    set_install_cost(6500.00)
+    data    = _load()
+    history = data["daily_history"]
 
-    import json
-    print(json.dumps(get_all(), indent=2))
-    print("\nPayoff progress:", get_payoff_progress())
+    if period == "day":
+        date_str = reference_date.isoformat()
+        days = [d for d in history if d["date"] == date_str]
+
+    elif period == "week":
+        monday = reference_date - datetime.timedelta(days=reference_date.weekday())
+        sunday = monday + datetime.timedelta(days=6)
+        days = [d for d in history
+                if monday.isoformat() <= d["date"] <= sunday.isoformat()]
+
+    elif period == "month":
+        month_str = reference_date.strftime("%Y-%m")
+        days = [d for d in history if d["date"].startswith(month_str)]
+
+    elif period == "year":
+        year_str = str(reference_date.year)
+        days = [d for d in history if d["date"].startswith(year_str)]
+
+    else:  # lifetime
+        days = history
+
+    return {
+        "generation_kwh": round(sum(d["generation_kwh"] for d in days), 2),
+        "export_kwh":     round(sum(d["export_kwh"] for d in days), 2),
+        "earnings_gbp":   round(sum(d["export_earnings_gbp"] for d in days), 2),
+        "days":           len(days),
+    }
+
+def get_period_label(period, reference_date=None):
+    if reference_date is None:
+        reference_date = datetime.date.today()
+
+    if period == "year":
+        return str(reference_date.year)
+    elif period == "month":
+        return reference_date.strftime("%B %Y")
+    elif period == "week":
+        monday = reference_date - datetime.timedelta(days=reference_date.weekday())
+        sunday = monday + datetime.timedelta(days=6)
+        return f"{monday.day}–{sunday.day} {sunday.strftime('%b')}"
+    else:
+        return "All time"

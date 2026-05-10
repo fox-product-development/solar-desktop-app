@@ -5,6 +5,7 @@ import customtkinter as ctk
 import ctypes
 import sys
 import config
+from core import data_store
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
@@ -64,6 +65,8 @@ class LongTermPanel:
         self.main = main_widget
         self.is_open = False
         self._animating = False
+        self._current_period = "year"
+        self._ref_date = datetime.date.today()
 
         self.win = tk.Toplevel(main_widget)
         self.win.overrideredirect(True)
@@ -86,7 +89,6 @@ class LongTermPanel:
         chip_frame = tk.Frame(self.win, bg=BG)
         chip_frame.pack(fill="x", padx=10, pady=(12, 6))
 
-        self._period = tk.StringVar(value="Year")
         self._chip_btns = {}
         for period in ["Week", "Month", "Year", "Lifetime"]:
             btn = ctk.CTkButton(
@@ -181,37 +183,61 @@ class LongTermPanel:
             anchor="w", padx=12, pady=(0, 8))
 
     def _select_period(self, period):
-        self._period.set(period)
+        self._current_period = period.lower()
+        self._ref_date = datetime.date.today()
         for p, btn in self._chip_btns.items():
             if p == period:
                 btn.configure(fg_color=TEAL, text_color="white", border_color=TEAL)
             else:
                 btn.configure(fg_color=CARD, text_color=MUTED, border_color=BORDER)
+        self._refresh_data()
 
     def _prev_period(self):
-        pass
+        if self._current_period == "year":
+            self._ref_date = self._ref_date.replace(year=self._ref_date.year - 1)
+        elif self._current_period == "month":
+            if self._ref_date.month == 1:
+                self._ref_date = self._ref_date.replace(year=self._ref_date.year - 1, month=12)
+            else:
+                self._ref_date = self._ref_date.replace(month=self._ref_date.month - 1)
+        elif self._current_period == "week":
+            self._ref_date -= datetime.timedelta(weeks=1)
+        self._refresh_data()
 
     def _next_period(self):
-        pass
+        if self._current_period == "year":
+            self._ref_date = self._ref_date.replace(year=self._ref_date.year + 1)
+        elif self._current_period == "month":
+            if self._ref_date.month == 12:
+                self._ref_date = self._ref_date.replace(year=self._ref_date.year + 1, month=1)
+            else:
+                self._ref_date = self._ref_date.replace(month=self._ref_date.month + 1)
+        elif self._current_period == "week":
+            self._ref_date += datetime.timedelta(weeks=1)
+        self._refresh_data()
 
-    def update_data(self, store):
-        if not store:
-            return
-        history    = store.get("daily_history", [])
-        total_gen  = sum(d["generation_kwh"] for d in history)
-        total_exp  = sum(d["export_kwh"] for d in history)
-        total_earn = store.get("cumulative_export_earnings_gbp", 0.0)
+    def _refresh_data(self):
+        period = self._current_period
+        label  = data_store.get_period_label(period, self._ref_date)
+        totals = data_store.get_period_totals(period, self._ref_date)
 
-        self._lt_refs["lt_gen"].configure(text=f"{total_gen:.1f} kWh")
-        self._lt_refs["lt_export"].configure(text=f"{total_exp:.1f} kWh")
-        self._lt_refs["lt_earnings"].configure(text=f"£{total_earn:.2f}")
+        self._period_label.configure(text=label)
+        self._lt_refs["lt_gen"].configure(text=f"{totals['generation_kwh']:.1f} kWh")
+        self._lt_refs["lt_export"].configure(text=f"{totals['export_kwh']:.1f} kWh")
+        self._lt_refs["lt_earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
 
+        store = data_store.get_all()
         payoff = store.get("install_cost_gbp")
         if payoff:
+            total_earn = store.get("cumulative_export_earnings_gbp", 0.0)
             pct = min(1.0, total_earn / payoff)
             self._lt_refs["roi_bar"].place(relwidth=pct)
             self._lt_refs["roi_label"].configure(
                 text=f"£{total_earn:.2f} of £{payoff:.0f} · {pct*100:.1f}%")
+
+    def update_data(self, store):
+        """Called on every UI refresh — updates with current period data."""
+        self._refresh_data()
 
     def toggle(self):
         if self._animating:
@@ -282,6 +308,7 @@ class SolarWidget(ctk.CTk):
         self.realtime_y_offset = 230
         self.realtime_section_height = 280
         self.lt_panel = None
+        self._daily_mode = "today"  # "today" or "week"
 
         self.overrideredirect(True)
         self.attributes("-topmost", False)
@@ -610,7 +637,7 @@ class SolarWidget(ctk.CTk):
                 "kwh":  kwh_lbl,
             })
 
-        # Today's generation forecast chart — inside tea time card
+        # Today's generation forecast chart inside tea time card
         chart_frame = ctk.CTkFrame(tea, fg_color=CARD, corner_radius=6)
         chart_frame.pack(fill="x", padx=12, pady=(10, 10))
 
@@ -619,7 +646,6 @@ class SolarWidget(ctk.CTk):
         ax = fig.add_subplot(111)
         ax.set_facecolor("#f2f4f3")
 
-        # Placeholder — will be replaced with weather-based forecast
         hours  = list(range(24))
         values = [0]*24
 
@@ -680,12 +706,9 @@ class SolarWidget(ctk.CTk):
 
             if live:
                 self._refs["pv_power"].configure(text=f"{live['pv_power_kw']}")
-                self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
-                self._refs["load_pct"].configure(text=f"{live['load_satisfied_pct']}%")
+                self._update_daily_stats(live, store)
 
             if store:
-                earnings = store.get("cumulative_export_earnings_gbp", 0.0)
-                self._refs["earnings"].configure(text=f"£{earnings:.2f}")
                 best = store.get("best_hour_kwh", 0.0)
                 self._refs["best_hour"].configure(
                     text=f"{best:.2f}" if best else "--")
@@ -704,8 +727,23 @@ class SolarWidget(ctk.CTk):
 
         self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
 
+    def _update_daily_stats(self, live, store):
+        """Update generated/exported/earnings based on today or week toggle."""
+        if self._daily_mode == "today":
+            # Use live data for today
+            self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
+            self._refs["load_pct"].configure(text="--")
+            self._refs["exported"].configure(text="--")
+            self._refs["earnings"].configure(text="--")
+        else:
+            # Week totals from data store
+            totals = data_store.get_period_totals("week")
+            self._refs["generated"].configure(text=f"{totals['generation_kwh']:.1f} kWh")
+            self._refs["load_pct"].configure(text="--")
+            self._refs["exported"].configure(text="--")
+            self._refs["earnings"].configure(text="--")
+
     def _update_forecast_chart(self, today_forecast):
-        """Update the chart with today's hourly generation forecast."""
         sunshine = today_forecast.get("sunshine_hrs", 0)
         peak_kw  = 3.09
 
@@ -722,8 +760,7 @@ class SolarWidget(ctk.CTk):
         ax.cla()
         ax.set_facecolor("#f2f4f3")
 
-        # Highlight past hours slightly dimmer
-        now = datetime.datetime.now().hour
+        now    = datetime.datetime.now().hour
         colors = ["#3ec9b6" if h >= now else "#a8e8dc" for h in range(24)]
 
         ax.bar(range(24), values, color=colors, width=0.8, alpha=0.85)
@@ -739,7 +776,6 @@ class SolarWidget(ctk.CTk):
         ax.spines["bottom"].set_color("#dde8e5")
         ax.tick_params(axis="x", length=0)
         ax.figure.tight_layout(pad=0.3)
-
         canvas.draw()
 
     def _update_tea_time(self, today_forecast):
@@ -787,20 +823,26 @@ class SolarWidget(ctk.CTk):
     # ------------------------------------------------------------------ #
 
     def _show_today(self):
+        self._daily_mode = "today"
         self.btn_today.configure(
             fg_color=TEAL, text_color="white",
             font=ctk.CTkFont(size=11, weight="bold"))
         self.btn_week.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
+        snap = self.refresher.snapshot() if self.refresher else {}
+        self._update_daily_stats(snap.get("live"), snap.get("store", {}))
 
     def _show_week(self):
+        self._daily_mode = "week"
         self.btn_week.configure(
             fg_color=TEAL, text_color="white",
             font=ctk.CTkFont(size=11, weight="bold"))
         self.btn_today.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
+        snap = self.refresher.snapshot() if self.refresher else {}
+        self._update_daily_stats(snap.get("live"), snap.get("store", {}))
 
     # ------------------------------------------------------------------ #
     # Windows always-on-bottom                                            #
