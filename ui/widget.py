@@ -4,6 +4,9 @@ import customtkinter as ctk
 import ctypes
 import sys
 import config
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
 
 # --- Theme ---
 ctk.set_appearance_mode("light")
@@ -258,23 +261,44 @@ class SolarWidget(ctk.CTk):
                     card, fg_color=BORDER, height=1
                 ).pack(fill="x", padx=12, pady=2)
 
-        # Chart placeholder
+        # 7-day hourly profile chart
         ctk.CTkLabel(
             card, text="7-day hourly profile",
             font=ctk.CTkFont(size=11), text_color=MUTED
         ).pack(anchor="w", padx=12, pady=(6, 4))
 
         chart_frame = ctk.CTkFrame(
-            card, fg_color="#f2f4f3",
-            corner_radius=6, height=60
-        )
+            card, fg_color=CARD, corner_radius=6)
         chart_frame.pack(fill="x", padx=12, pady=(0, 10))
-        ctk.CTkLabel(
-            chart_frame,
-            text="[ chart will render here ]",
-            font=ctk.CTkFont(size=10),
-            text_color=MUTED
-        ).pack(expand=True)
+
+        fig = Figure(figsize=(2.5, 0.6), dpi=100)
+        fig.patch.set_facecolor("#ffffff")
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#f2f4f3")
+
+        # Placeholder data — will be replaced with real 7-day averages
+        hours = list(range(24))
+        values = [0,0,0,0,0,0,0,0.1,0.4,0.9,1.4,1.8,2.1,1.9,1.6,1.2,0.7,0.3,0.1,0,0,0,0,0]
+
+        ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.85)
+        ax.set_xlim(-0.5, 23.5)
+        ax.set_ylim(0, 3.2)
+        ax.set_xticks([0, 6, 12, 18, 23])
+        ax.set_xticklabels(["00:00", "06:00", "12:00", "18:00", "23:00"],
+                           fontsize=7, color="#8aa8a2")
+        ax.set_yticks([])
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.spines["bottom"].set_color("#dde8e5")
+        ax.tick_params(axis="x", length=0)
+        fig.tight_layout(pad=0.3)
+
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="x")
+        self._refs["chart_ax"] = ax
+        self._refs["chart_canvas"] = canvas
 
         self._pad()
 
