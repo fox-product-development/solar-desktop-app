@@ -690,19 +690,20 @@ class SolarWidget(ctk.CTk):
 
                 days = weather.get("forecast", [])
                 for i, day in enumerate(days[:3]):
-                    est = round(day["sunshine_hrs"] * 0.85, 1)
                     self._refs[f"fcast_icon_{i}"].configure(text=day["emoji"])
                     self._refs[f"fcast_day_{i}"].configure(
                         text=["Today", "Tomorrow"][i] if i < 2 else
                         (datetime.datetime.now() +
                          datetime.timedelta(days=2)).strftime("%A"))
                     self._refs[f"fcast_cond_{i}"].configure(text=day["description"])
-                    self._refs[f"fcast_kwh_{i}"].configure(text=str(est))
+                    self._refs[f"fcast_kwh_{i}"].configure(
+                        text=str(day.get("day_kwh", "--")))
 
-                forecast = weather.get("forecast", [])
+                hourly_kwh = weather.get("hourly_kwh", [0.0]*24)
+                forecast   = weather.get("forecast", [])
                 if forecast:
-                    self._update_tea_time(forecast[0])
-                    self._update_forecast_chart(forecast[0])
+                    self._update_tea_time(hourly_kwh)
+                    self._update_forecast_chart(hourly_kwh)
 
             if live:
                 self._refs["pv_power"].configure(text=f"{live['pv_power_kw']}")
@@ -732,7 +733,7 @@ class SolarWidget(ctk.CTk):
         if self._daily_mode == "today":
             # Use live data for today
             self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
-            self._refs["load_pct"].configure(text="--")
+            self._refs["load_pct"].configure(text=f"{live['load_satisfied_pct']}%")
             self._refs["exported"].configure(text="--")
             self._refs["earnings"].configure(text="--")
         else:
@@ -743,17 +744,7 @@ class SolarWidget(ctk.CTk):
             self._refs["exported"].configure(text="--")
             self._refs["earnings"].configure(text="--")
 
-    def _update_forecast_chart(self, today_forecast):
-        sunshine = today_forecast.get("sunshine_hrs", 0)
-        peak_kw  = 3.09
-
-        values = []
-        for hour in range(24):
-            dist    = abs(hour - 13)
-            weight  = max(0, 1 - (dist / 7))
-            est_kwh = round(weight * (sunshine / 8) * peak_kw, 2)
-            values.append(est_kwh)
-
+    def _update_forecast_chart(self, hourly_kwh):
         ax     = self._refs["chart_ax"]
         canvas = self._refs["chart_canvas"]
 
@@ -763,7 +754,7 @@ class SolarWidget(ctk.CTk):
         now    = datetime.datetime.now().hour
         colors = ["#3ec9b6" if h >= now else "#a8e8dc" for h in range(24)]
 
-        ax.bar(range(24), values, color=colors, width=0.8, alpha=0.85)
+        ax.bar(range(24), hourly_kwh, color=colors, width=0.8, alpha=0.85)
         ax.set_xlim(-0.5, 23.5)
         ax.set_ylim(0, 3.2)
         ax.set_xticks([0, 6, 12, 18, 23])
@@ -778,18 +769,16 @@ class SolarWidget(ctk.CTk):
         ax.figure.tight_layout(pad=0.3)
         canvas.draw()
 
-    def _update_tea_time(self, today_forecast):
-        now      = datetime.datetime.now().hour
-        sunshine = today_forecast.get("sunshine_hrs", 0)
-        peak_kw  = 3.09
+    def _update_tea_time(self, hourly_kwh):
+        now     = datetime.datetime.now().hour
+        peak_kw = 3.09
 
-        remaining = []
-        for hour in range(now, 20):
-            dist    = abs(hour - 13)
-            weight  = max(0, 1 - (dist / 7))
-            est_kwh = round(weight * (sunshine / 8) * peak_kw, 2)
-            if est_kwh > 0.1:
-                remaining.append((hour, est_kwh))
+        # Only consider remaining hours with meaningful generation
+        remaining = [
+            (hour, hourly_kwh[hour])
+            for hour in range(now, 20)
+            if hour < len(hourly_kwh) and hourly_kwh[hour] > 0.1
+        ]
 
         top3 = sorted(remaining, key=lambda x: -x[1])[:3]
         top3.sort(key=lambda x: x[0])
@@ -830,8 +819,6 @@ class SolarWidget(ctk.CTk):
         self.btn_week.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
-        snap = self.refresher.snapshot() if self.refresher else {}
-        self._update_daily_stats(snap.get("live"), snap.get("store", {}))
 
     def _show_week(self):
         self._daily_mode = "week"
@@ -841,8 +828,6 @@ class SolarWidget(ctk.CTk):
         self.btn_today.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
-        snap = self.refresher.snapshot() if self.refresher else {}
-        self._update_daily_stats(snap.get("live"), snap.get("store", {}))
 
     # ------------------------------------------------------------------ #
     # Windows always-on-bottom                                            #
