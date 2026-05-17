@@ -98,8 +98,8 @@ class DataRefresher:
         if not weather["error"]:
             with self._lock:
                 self.weather = weather
-            log.info("Weather: %s %s %.1f°C",
-                     weather["icon"], weather["description"], weather["temperature"])
+            log.info("Weather: %s %.1f°C",
+                     weather["description"], weather["temperature"])
 
         # 4. Update today's record in the data store.
         #    Use dev API totals when available; fall back to live pvDayNrg
