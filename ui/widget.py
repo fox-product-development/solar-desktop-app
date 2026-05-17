@@ -260,28 +260,41 @@ class LongTermPanel:
         store   = data_store.get_all()
         payoff  = store.get("install_cost_gbp")
         if payoff:
-            total_earn = store.get("cumulative_export_earnings_gbp", 0.0)
+            history  = store.get("daily_history", [])
+            seg_rate = getattr(config, "OCTOPUS_SEG_RATE",    0.12)
+            imp_rate = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
+
+            INSTALL_DATE = "2026-05-07"
+            SEG_DATE     = "2026-05-15"
+
+            # Export earnings: only from SEG start date
+            total_export_earn = sum(
+                d["export_kwh"] * seg_rate
+                for d in history if d["date"] >= SEG_DATE
+            )
+
+            # Import savings: self-used generation (gen - export) from install date
+            # This is the grid power displaced by solar, valued at import rate
+            total_import_saved = sum(
+                max(0.0, d["generation_kwh"] - d["export_kwh"]) * imp_rate
+                for d in history if d["date"] >= INSTALL_DATE
+            )
+
+            total_earn = round(total_export_earn + total_import_saved, 2)
             pct        = min(1.0, total_earn / payoff)
             self._lt_refs["roi_bar"].place(relwidth=max(0.01, pct))
             self._lt_refs["roi_label"].configure(
                 text=f"£{total_earn:.2f} of £{payoff:.0f} · {pct*100:.1f}%")
 
-            history  = store.get("daily_history", [])
-            seg_rate = getattr(config, "OCTOPUS_SEG_RATE",    0.12)
-            imp_rate = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
+            # Avg daily export: days since SEG start
+            install_date_obj = datetime.date(2026, 5, 7)
+            seg_date_obj     = datetime.date(2026, 5, 15)
+            today            = datetime.date.today()
+            days_since_seg     = max(1, (today - seg_date_obj).days + 1)
+            days_since_install = max(1, (today - install_date_obj).days + 1)
 
-            seg_start  = datetime.date(2026, 5, 15)
-            days_since = max(1, (datetime.date.today() - seg_start).days)
-
-            total_export = sum(d["export_kwh"] for d in history
-                               if d["date"] >= "2026-05-15")
-            avg_daily_export_earn = (total_export * seg_rate) / days_since
-
-            total_self = sum(
-                max(0.0, d["generation_kwh"] - d["export_kwh"])
-                for d in history if d["date"] >= "2026-05-15"
-            )
-            avg_daily_import_saved = (total_self * imp_rate) / days_since
+            avg_daily_export_earn  = total_export_earn  / days_since_seg
+            avg_daily_import_saved = total_import_saved / days_since_install
 
             avg_daily_total = avg_daily_export_earn + avg_daily_import_saved
             remaining       = max(0.0, payoff - total_earn)
