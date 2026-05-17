@@ -168,6 +168,7 @@ def get_period_totals(period="day", reference_date=None):
     return {
         "generation_kwh": round(sum(d["generation_kwh"] for d in days), 2),
         "export_kwh":     round(sum(d["export_kwh"] for d in days if d["date"] >= SEG_START), 2),
+        "import_kwh":     round(sum(d["import_kwh"] for d in days), 2),
         "earnings_gbp":   round(sum(d["export_earnings_gbp"] for d in days if d["date"] >= SEG_START), 2),
         "days":           len(days),
     }

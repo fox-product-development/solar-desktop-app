@@ -385,6 +385,7 @@ class SolarWidget(ctk.CTk):
         self._daily_mode = "today"  # "today" or "week"
 
         self.overrideredirect(True)
+        self.wm_attributes("-toolwindow", True)
         self.attributes("-topmost", False)
         self.attributes("-alpha", 0.7)
         self.configure(fg_color=BG)
@@ -852,7 +853,16 @@ class SolarWidget(ctk.CTk):
         else:
             totals = data_store.get_period_totals("week")
             self._refs["generated"].configure(text=f"{totals['generation_kwh']:.1f} kWh")
-            self._refs["load_pct"].configure(text="--")
+            gen = totals["generation_kwh"]
+            imp = totals["import_kwh"]
+            exp = totals["export_kwh"]
+            total_load = gen + imp - exp
+            if total_load > 0:
+                load_pct = round((1 - (imp / total_load)) * 100, 1)
+                load_pct = max(0.0, min(100.0, load_pct))
+                self._refs["load_pct"].configure(text=f"{load_pct}%")
+            else:
+                self._refs["load_pct"].configure(text="--")
             self._refs["exported"].configure(text=f"{totals['export_kwh']:.1f} kWh")
             self._refs["earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
 

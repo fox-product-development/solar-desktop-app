@@ -3,3 +3,4 @@ customtkinter
 requests
 pywin32
 pillow
+pystray

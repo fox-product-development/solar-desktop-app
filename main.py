@@ -145,10 +145,52 @@ def main():
     refresher.start()
 
     from ui.widget import SolarWidget
-    app = SolarWidget(refresher)
+    from ui.tray_icon import TrayIcon
+
+    app  = SolarWidget(refresher)
+    tray = TrayIcon(app)
+    tray.start()
+
+    # Wire up tray tooltip updates on each UI refresh
+    _patch_tray_updates(app, tray, refresher)
+
     app.mainloop()
 
+    tray.stop()
     refresher.stop()
+
+
+def _patch_tray_updates(app, tray, refresher):
+    """
+    Hook into the widget's periodic refresh to keep the tray icon and
+    tooltip in sync with live generation data.
+    Runs every REFRESH_SECONDS after the UI has started.
+    """
+    def _tick():
+        try:
+            snap = refresher.snapshot()
+            live = snap.get("live")
+            if live:
+                generating = live["pv_power_kw"] > 0.05
+                tray.set_generating(generating)
+                kw    = live["pv_power_kw"]
+                store = snap.get("store", {})
+                today_str = datetime.date.today().isoformat()
+                today_rec = next(
+                    (d for d in store.get("daily_history", [])
+                     if d["date"] == today_str), None
+                )
+                kwh_today = today_rec["generation_kwh"] if today_rec else 0.0
+                tray.set_tooltip(
+                    f"Solar Monitor\n"
+                    f"Now: {kw:.2f} kW\n"
+                    f"Today: {kwh_today:.2f} kWh"
+                )
+        except Exception:
+            pass
+        app.after(config.REFRESH_SECONDS * 1000, _tick)
+
+    app.after(config.REFRESH_SECONDS * 1000, _tick)
 
 
 if __name__ == "__main__":
