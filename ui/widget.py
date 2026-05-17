@@ -480,42 +480,9 @@ class SolarWidget(ctk.CTk):
             font=ctk.CTkFont(size=9, weight="bold"),
             text_color=TEAL,
         )
-        title.pack(anchor="w", padx=14, pady=(8, 2))
-
-        card = Card(self.scroll)
-        card.pack(fill="x", padx=10, pady=(0, 2))
-
-        row = ctk.CTkFrame(card, fg_color=CARD)
-        row.pack(fill="x", padx=10, pady=1)
-
-        self._refs["weather_icon"] = ctk.CTkLabel(
-            row, text="--", font=ctk.CTkFont(size=24), text_color=TEXT)
-        self._refs["weather_icon"].pack(side="left")
-
-        temp_frame = ctk.CTkFrame(row, fg_color=CARD)
-        temp_frame.pack(side="left", padx=8)
-
-        self._refs["temp"] = ctk.CTkLabel(
-            temp_frame, text="--°C",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT)
-        self._refs["temp"].pack(anchor="w")
-
-        self._refs["condition"] = ctk.CTkLabel(
-            temp_frame, text="Loading...",
-            font=ctk.CTkFont(size=10), text_color=MUTED)
-        self._refs["condition"].pack(anchor="w")
-
-        self._refs["updated"] = ctk.CTkLabel(
-            row, text="Updated\n--:--",
-            font=ctk.CTkFont(size=10), text_color=MUTED, justify="right")
-        self._refs["updated"].pack(side="right")
-
-        self._pad()
+        title.pack(anchor="w", padx=14, pady=(8, 6))
 
     def _build_realtime(self):
-        SectionLabel(self.scroll, "Realtime").pack(
-            anchor="w", padx=14, pady=(0, 4))
-
         card = Card(self.scroll)
         card.pack(fill="x", padx=10, pady=(0, 4))
 
@@ -594,12 +561,14 @@ class SolarWidget(ctk.CTk):
         card.pack(fill="x", padx=10, pady=(0, 4))
 
         stat_keys = [
-            ("generated",  "Generated so far",      "--",  TEAL),
-            ("load_pct",   "Load satisfied",         "--",  TEXT),
-            ("exported",   "Exported",               "--",  TEXT),
-            ("earnings",   "Export earnings",        "--",  TEAL),
-            ("avg_gen",    "7-day avg generation",   "--",  TEXT),
-            ("avg_export", "7-day avg export",       "--",  TEXT),
+            ("generated",     "Generated so far",        "--",  TEAL),
+            ("load_pct",      "Load satisfied",           "--",  TEXT),
+            ("exported",      "Exported",                 "--",  TEXT),
+            ("earnings",      "Export earnings",          "--",  TEAL),
+            ("import_saving", "Import saving",            "--",  TEAL),
+            ("avg_gen",       "7-day avg generation",     "--",  TEXT),
+            ("avg_export",    "7-day avg export",         "--",  TEXT),
+            ("avg_import",    "7-day avg import saving",  "--",  TEXT),
         ]
 
         for i, (key, label, value, colour) in enumerate(stat_keys):
@@ -617,7 +586,7 @@ class SolarWidget(ctk.CTk):
             ref.pack(side="right")
             self._refs[key] = ref
 
-            if i in (1, 3):
+            if i in (1, 3, 4):
                 ctk.CTkFrame(
                     card, fg_color=BORDER, height=1
                 ).pack(fill="x", padx=12, pady=2)
@@ -644,6 +613,12 @@ class SolarWidget(ctk.CTk):
             icon = ctk.CTkLabel(row, text=emoji, font=ctk.CTkFont(size=26))
             icon.pack(side="left")
             self._refs[f"fcast_icon_{i}"] = icon
+
+            temp_label = ctk.CTkLabel(
+                row, text="--°C",
+                font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT)
+            temp_label.pack(side="left", padx=(0, 0))
+            self._refs[f"fcast_temp_{i}"] = temp_label
 
             info = ctk.CTkFrame(row, fg_color=CARD)
             info.pack(side="left", padx=8)
@@ -735,7 +710,7 @@ class SolarWidget(ctk.CTk):
         chart_frame = ctk.CTkFrame(tea, fg_color=CARD, corner_radius=6)
         chart_frame.pack(fill="x", padx=12, pady=(10, 10))
 
-        fig = Figure(figsize=(2.5, 0.7), dpi=100)
+        fig = Figure(figsize=(2.5, 1), dpi=100)
         fig.patch.set_facecolor("#ffffff")
         ax = fig.add_subplot(111)
         ax.set_facecolor("#f2f4f3")
@@ -775,16 +750,11 @@ class SolarWidget(ctk.CTk):
             store   = snap.get("store", {})
 
             if weather and not weather.get("error"):
-                self._refs["weather_icon"].configure(text=weather["emoji"])
-                self._refs["temp"].configure(text=f"{weather['temperature']}°C")
-                self._refs["condition"].configure(
-                    text=f"{weather['description']} · Wind {weather['wind_kph']} km/h")
-                self._refs["updated"].configure(
-                    text=f"Updated\n{datetime.datetime.now().strftime('%H:%M')}")
-
                 days = weather.get("forecast", [])
                 for i, day in enumerate(days[:3]):
                     self._refs[f"fcast_icon_{i}"].configure(text=day["emoji"])
+                    self._refs[f"fcast_temp_{i}"].configure(
+                        text=f"{round(day['temp_max'])}°C")
                     self._refs[f"fcast_day_{i}"].configure(
                         text=["Today", "Tomorrow"][i] if i < 2 else
                         (datetime.datetime.now() +
@@ -823,12 +793,16 @@ class SolarWidget(ctk.CTk):
                 history = store.get("daily_history", [])
                 if history:
                     last7    = history[-7:]
-                    avg_gen  = sum(d["generation_kwh"] for d in last7) / 7
-                    avg_exp  = sum(d["export_kwh"] for d in last7) / 7
-                    avg_earn = avg_exp * config.OCTOPUS_SEG_RATE
+                    avg_gen       = sum(d["generation_kwh"] for d in last7) / 7
+                    avg_exp       = sum(d["export_kwh"] for d in last7) / 7
+                    avg_earn      = avg_exp * config.OCTOPUS_SEG_RATE
+                    avg_self_used = sum(max(0.0, d["generation_kwh"] - d["export_kwh"]) for d in last7) / 7
+                    avg_imp_save  = avg_self_used * getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
                     self._refs["avg_gen"].configure(text=f"{avg_gen:.1f} kWh")
                     self._refs["avg_export"].configure(
                         text=f"{avg_exp:.1f} kWh · £{avg_earn:.2f}")
+                    self._refs["avg_import"].configure(
+                        text=f"£{avg_imp_save:.2f}/day")
 
         self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
 
@@ -863,6 +837,14 @@ class SolarWidget(ctk.CTk):
             else:
                 self._refs["exported"].configure(text="--")
                 self._refs["earnings"].configure(text="--")
+
+            if today_rec:
+                self_used = max(0.0, today_rec.get("generation_kwh", 0.0) - today_rec.get("export_kwh", 0.0))
+                imp_rate  = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
+                self._refs["import_saving"].configure(
+                    text=f"£{self_used * imp_rate:.2f}" if self_used > 0 else "--")
+            else:
+                self._refs["import_saving"].configure(text="--")
         else:
             totals = data_store.get_period_totals("week")
             self._refs["generated"].configure(text=f"{totals['generation_kwh']:.1f} kWh")
@@ -878,6 +860,10 @@ class SolarWidget(ctk.CTk):
                 self._refs["load_pct"].configure(text="--")
             self._refs["exported"].configure(text=f"{totals['export_kwh']:.1f} kWh")
             self._refs["earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
+            self_used_week = max(0.0, totals["generation_kwh"] - totals["export_kwh"])
+            imp_rate       = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
+            self._refs["import_saving"].configure(
+                text=f"£{self_used_week * imp_rate:.2f}" if self_used_week > 0 else "--")
 
     def _update_forecast_chart(self, hourly_kwh):
         ax     = self._refs["chart_ax"]
