@@ -99,7 +99,7 @@ class DataRefresher:
             with self._lock:
                 self.weather = weather
             log.info("Weather: %s %s %.1f°C",
-                     weather["emoji"], weather["description"], weather["temperature"])
+                     weather["icon"], weather["description"], weather["temperature"])
 
         # 4. Update today's record in the data store.
         #    Use dev API totals when available; fall back to live pvDayNrg

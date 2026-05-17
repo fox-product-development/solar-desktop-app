@@ -10,6 +10,24 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
+# --- Weather icon cache ---
+_weather_icon_cache = {}
+
+def _load_weather_icon(name, size=40):
+    """Load a weather PNG from assets/icons/weather/ and cache it as CTkImage."""
+    if name in _weather_icon_cache:
+        return _weather_icon_cache[name]
+    import os
+    from PIL import Image as PilImage
+    path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "weather", f"{name}.png")
+    try:
+        img = PilImage.open(path).convert("RGBA")
+        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+        _weather_icon_cache[name] = ctk_img
+        return ctk_img
+    except Exception:
+        return None
+
 # --- Theme ---
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -392,7 +410,7 @@ class SolarWidget(ctk.CTk):
 
         self.refresher = refresher
         self._refs = {}
-        self.realtime_y_offset = 230
+        self.realtime_y_offset = 50
         self.realtime_section_height = 600
         self.lt_panel = None
         self._daily_mode = "today"  # "today" or "week"
@@ -610,14 +628,14 @@ class SolarWidget(ctk.CTk):
             row = ctk.CTkFrame(card, fg_color=CARD)
             row.pack(fill="x", padx=12, pady=5)
 
-            icon = ctk.CTkLabel(row, text=emoji, font=ctk.CTkFont(size=26))
+            icon = ctk.CTkLabel(row, text="", image=None)
             icon.pack(side="left")
             self._refs[f"fcast_icon_{i}"] = icon
 
             temp_label = ctk.CTkLabel(
                 row, text="--°C",
                 font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT)
-            temp_label.pack(side="left", padx=(0, 0))
+            temp_label.pack(side="left", padx=(8, 8))
             self._refs[f"fcast_temp_{i}"] = temp_label
 
             info = ctk.CTkFrame(row, fg_color=CARD)
@@ -656,7 +674,15 @@ class SolarWidget(ctk.CTk):
 
         header = ctk.CTkFrame(tea, fg_color=CARD)
         header.pack(fill="x", padx=12, pady=(8, 4))
-        ctk.CTkLabel(header, text="☕", font=ctk.CTkFont(size=20)).pack(side="left")
+        import os
+        from PIL import Image as PilImage
+        _tea_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tea.png")
+        try:
+            _tea_pil = PilImage.open(_tea_path).convert("RGBA")
+            _tea_img = ctk.CTkImage(light_image=_tea_pil, dark_image=_tea_pil, size=(32, 32))
+            ctk.CTkLabel(header, text="", image=_tea_img).pack(side="left")
+        except Exception:
+            ctk.CTkLabel(header, text="☕", font=ctk.CTkFont(size=20)).pack(side="left")
         title_frame = ctk.CTkFrame(header, fg_color=CARD)
         title_frame.pack(side="left", padx=8)
         ctk.CTkLabel(
@@ -752,7 +778,11 @@ class SolarWidget(ctk.CTk):
             if weather and not weather.get("error"):
                 days = weather.get("forecast", [])
                 for i, day in enumerate(days[:3]):
-                    self._refs[f"fcast_icon_{i}"].configure(text=day["emoji"])
+                    img = _load_weather_icon(day["icon"])
+                    if img:
+                        self._refs[f"fcast_icon_{i}"].configure(image=img, text="")
+                    else:
+                        self._refs[f"fcast_icon_{i}"].configure(image=None, text="?")
                     self._refs[f"fcast_temp_{i}"].configure(
                         text=f"{round(day['temp_max'])}°C")
                     self._refs[f"fcast_day_{i}"].configure(
