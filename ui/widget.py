@@ -86,7 +86,10 @@ class LongTermPanel:
         return open_x, closed_x, realtime_y, panel_h
 
     def _build_content(self):
-        chip_frame = tk.Frame(self.win, bg=BG)
+        scroll = tk.Frame(self.win, bg=BG)
+        scroll.pack(fill="both", expand=True)
+
+        chip_frame = tk.Frame(scroll, bg=BG)
         chip_frame.pack(fill="x", padx=10, pady=(12, 6))
 
         self._chip_btns = {}
@@ -106,7 +109,7 @@ class LongTermPanel:
             btn.pack(side="left", padx=(0, 3))
             self._chip_btns[period] = btn
 
-        nav = ctk.CTkFrame(self.win, fg_color=BG)
+        nav = ctk.CTkFrame(scroll, fg_color=BG)
         nav.pack(fill="x", padx=10, pady=(0, 8))
         nav.columnconfigure(1, weight=1)
 
@@ -134,7 +137,8 @@ class LongTermPanel:
             command=self._next_period
         ).grid(row=0, column=2)
 
-        card = Card(self.win)
+        # ── Stats card ────────────────────────────────────────────────────
+        card = Card(scroll)
         card.pack(fill="x", padx=10, pady=(0, 8))
 
         self._lt_refs = {}
@@ -162,25 +166,52 @@ class LongTermPanel:
                 ).pack(fill="x", padx=12, pady=2)
 
         ctk.CTkFrame(card, fg_color=BORDER, height=1).pack(
-            fill="x", padx=12, pady=2)
+            fill="x", padx=12, pady=(2, 8))
+
+        # ── Payoff countdown card ─────────────────────────────────────────
+        countdown_card = Card(scroll)
+        countdown_card.pack(fill="x", padx=10, pady=(0, 8))
+
         ctk.CTkLabel(
-            card, text="Payoff progress",
+            countdown_card, text="Est. payoff",
             font=ctk.CTkFont(size=11), text_color=MUTED
-        ).pack(anchor="w", padx=12, pady=(4, 2))
+        ).pack(anchor="w", padx=12, pady=(8, 0))
+
+        self._lt_refs["payoff_remaining"] = ctk.CTkLabel(
+            countdown_card, text="--",
+            font=ctk.CTkFont(size=16, weight="bold"), text_color=TEAL)
+        self._lt_refs["payoff_remaining"].pack(anchor="w", padx=12, pady=(2, 4))
 
         progress_bg = ctk.CTkFrame(
-            card, fg_color="#e8eeec", corner_radius=3, height=6)
-        progress_bg.pack(fill="x", padx=12, pady=(0, 4))
+            countdown_card, fg_color="#e8eeec", corner_radius=3, height=6)
+        progress_bg.pack(fill="x", padx=12, pady=(0, 2))
         self._lt_refs["roi_bar"] = ctk.CTkFrame(
             progress_bg, fg_color=TEAL, corner_radius=3, height=6)
         self._lt_refs["roi_bar"].place(
             relx=0, rely=0, relwidth=0.01, relheight=1)
-
         self._lt_refs["roi_label"] = ctk.CTkLabel(
-            card, text="Set install cost to track payoff",
+            countdown_card, text="",
             font=ctk.CTkFont(size=10), text_color=MUTED)
-        self._lt_refs["roi_label"].pack(
-            anchor="w", padx=12, pady=(0, 8))
+        self._lt_refs["roi_label"].pack(anchor="w", padx=12, pady=(0, 4))
+
+        ctk.CTkFrame(countdown_card, fg_color=BORDER, height=1).pack(
+            fill="x", padx=12, pady=(4, 6))
+
+        for key, label in [
+            ("payoff_countdown",  "Time remaining"),
+            ("payoff_avg_export", "Avg daily export value"),
+            ("payoff_avg_import", "Avg daily import saved"),
+        ]:
+            ctk.CTkLabel(
+                countdown_card, text=label,
+                font=ctk.CTkFont(size=10), text_color=MUTED
+            ).pack(anchor="w", padx=12, pady=(0, 0))
+            self._lt_refs[key] = ctk.CTkLabel(
+                countdown_card, text="--",
+                font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT)
+            self._lt_refs[key].pack(anchor="w", padx=12, pady=(0, 6))
+
+        ctk.CTkFrame(countdown_card, fg_color=BG, height=6).pack()
 
     def _select_period(self, period):
         self._current_period = period.lower()
@@ -226,14 +257,57 @@ class LongTermPanel:
         self._lt_refs["lt_export"].configure(text=f"{totals['export_kwh']:.1f} kWh")
         self._lt_refs["lt_earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
 
-        store = data_store.get_all()
-        payoff = store.get("install_cost_gbp")
+        store   = data_store.get_all()
+        payoff  = store.get("install_cost_gbp")
         if payoff:
             total_earn = store.get("cumulative_export_earnings_gbp", 0.0)
-            pct = min(1.0, total_earn / payoff)
-            self._lt_refs["roi_bar"].place(relwidth=pct)
+            pct        = min(1.0, total_earn / payoff)
+            self._lt_refs["roi_bar"].place(relwidth=max(0.01, pct))
             self._lt_refs["roi_label"].configure(
                 text=f"£{total_earn:.2f} of £{payoff:.0f} · {pct*100:.1f}%")
+
+            history  = store.get("daily_history", [])
+            seg_rate = getattr(config, "OCTOPUS_SEG_RATE",    0.12)
+            imp_rate = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
+
+            seg_start  = datetime.date(2026, 5, 15)
+            days_since = max(1, (datetime.date.today() - seg_start).days)
+
+            total_export = sum(d["export_kwh"] for d in history
+                               if d["date"] >= "2026-05-15")
+            avg_daily_export_earn = (total_export * seg_rate) / days_since
+
+            total_self = sum(
+                max(0.0, d["generation_kwh"] - d["export_kwh"])
+                for d in history if d["date"] >= "2026-05-15"
+            )
+            avg_daily_import_saved = (total_self * imp_rate) / days_since
+
+            avg_daily_total = avg_daily_export_earn + avg_daily_import_saved
+            remaining       = max(0.0, payoff - total_earn)
+
+            self._lt_refs["payoff_remaining"].configure(
+                text=f"£{remaining:,.0f} remaining")
+
+            if avg_daily_total > 0 and remaining > 0:
+                days_left = remaining / avg_daily_total
+                years     = int(days_left // 365)
+                months    = int((days_left % 365) // 30)
+                days      = int(days_left % 30)
+                parts = []
+                if years:  parts.append(f"{years}y")
+                if months: parts.append(f"{months}m")
+                if days or not parts: parts.append(f"{days}d")
+                self._lt_refs["payoff_countdown"].configure(text=" ".join(parts))
+            elif remaining <= 0:
+                self._lt_refs["payoff_countdown"].configure(text="Paid off! 🎉")
+            else:
+                self._lt_refs["payoff_countdown"].configure(text="--")
+
+            self._lt_refs["payoff_avg_export"].configure(
+                text=f"£{avg_daily_export_earn:.2f}/day")
+            self._lt_refs["payoff_avg_import"].configure(
+                text=f"£{avg_daily_import_saved:.2f}/day")
 
     def update_data(self, store):
         """Called on every UI refresh — updates with current period data."""
@@ -306,7 +380,7 @@ class SolarWidget(ctk.CTk):
         self.refresher = refresher
         self._refs = {}
         self.realtime_y_offset = 230
-        self.realtime_section_height = 280
+        self.realtime_section_height = 600
         self.lt_panel = None
         self._daily_mode = "today"  # "today" or "week"
 
@@ -748,10 +822,25 @@ class SolarWidget(ctk.CTk):
         """Update generated/exported/earnings based on today or week toggle."""
         if self._daily_mode == "today":
             self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
-            self._refs["load_pct"].configure(text=f"{live['load_satisfied_pct']}%")
+
             today_str = datetime.date.today().isoformat()
             today_rec = next(
                 (d for d in store.get("daily_history", []) if d["date"] == today_str), None)
+
+            if today_rec:
+                gen_kwh    = today_rec.get("generation_kwh", 0.0)
+                imp_kwh    = today_rec.get("import_kwh",     0.0)
+                exp_kwh    = today_rec.get("export_kwh",     0.0)
+                total_load = gen_kwh + imp_kwh - exp_kwh
+                if total_load > 0:
+                    load_pct = round((1 - (imp_kwh / total_load)) * 100, 1)
+                    load_pct = max(0.0, min(100.0, load_pct))
+                    self._refs["load_pct"].configure(text=f"{load_pct}%")
+                else:
+                    self._refs["load_pct"].configure(text="--")
+            else:
+                self._refs["load_pct"].configure(text="--")
+
             if today_rec and today_rec.get("export_kwh", 0.0):
                 self._refs["exported"].configure(
                     text=f"{today_rec['export_kwh']:.2f} kWh")
