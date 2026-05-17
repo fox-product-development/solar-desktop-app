@@ -679,7 +679,7 @@ class SolarWidget(ctk.CTk):
         _tea_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tea.png")
         try:
             _tea_pil = PilImage.open(_tea_path).convert("RGBA")
-            _tea_img = ctk.CTkImage(light_image=_tea_pil, dark_image=_tea_pil, size=(32, 32))
+            _tea_img = ctk.CTkImage(light_image=_tea_pil, dark_image=_tea_pil, size=(75, 50))
             ctk.CTkLabel(header, text="", image=_tea_img).pack(side="left")
         except Exception:
             ctk.CTkLabel(header, text="☕", font=ctk.CTkFont(size=20)).pack(side="left")
