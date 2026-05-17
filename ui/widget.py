@@ -70,7 +70,7 @@ class LongTermPanel:
 
         self.win = tk.Toplevel(main_widget)
         self.win.overrideredirect(True)
-        self.win.attributes("-alpha", 0.95)
+        self.win.attributes("-alpha", 0.7)
         self.win.configure(bg=BG)
         self.win.withdraw()
 
@@ -312,7 +312,7 @@ class SolarWidget(ctk.CTk):
 
         self.overrideredirect(True)
         self.attributes("-topmost", False)
-        self.attributes("-alpha", 0.95)
+        self.attributes("-alpha", 0.7)
         self.configure(fg_color=BG)
 
         screen_w = self.winfo_screenwidth()
@@ -454,19 +454,25 @@ class SolarWidget(ctk.CTk):
         right = ctk.CTkFrame(row, fg_color=CARD)
         right.pack(side="right")
         ctk.CTkLabel(
-            right, text="Best hour ever",
+            right, text="Best day ever",
             font=ctk.CTkFont(size=11), text_color=MUTED
         ).pack(anchor="e")
-        bh_row = ctk.CTkFrame(right, fg_color=CARD)
-        bh_row.pack(anchor="e")
-        self._refs["best_hour"] = ctk.CTkLabel(
-            bh_row, text="--",
-            font=ctk.CTkFont(size=20, weight="bold"), text_color=AMBER)
-        self._refs["best_hour"].pack(side="left")
+        bd_num_row = ctk.CTkFrame(right, fg_color=CARD)
+        bd_num_row.pack(anchor="e")
+        self._refs["best_day_kwh"] = ctk.CTkLabel(
+            bd_num_row, text="--",
+            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEAL)
+        self._refs["best_day_kwh"].pack(side="left")
         ctk.CTkLabel(
-            bh_row, text=" kWh",
+            bd_num_row, text=" kWh",
             font=ctk.CTkFont(size=12), text_color=MUTED
-        ).pack(side="left", pady=(4, 0))
+        ).pack(side="left", pady=(6, 0))
+        self._refs["best_day_date"] = ctk.CTkLabel(  # font size=11 — adjust if needed
+            right, text="",
+            font=ctk.CTkFont(size=11), text_color=MUTED)
+        self._refs["best_day_date"].pack(anchor="e")
+
+        ctk.CTkFrame(card, fg_color=BORDER, height=1).pack(fill="x", padx=12)
 
         self._pad()
 
@@ -641,7 +647,7 @@ class SolarWidget(ctk.CTk):
         chart_frame = ctk.CTkFrame(tea, fg_color=CARD, corner_radius=6)
         chart_frame.pack(fill="x", padx=12, pady=(10, 10))
 
-        fig = Figure(figsize=(2.5, 1), dpi=100)
+        fig = Figure(figsize=(2.5, 0.7), dpi=100)
         fig.patch.set_facecolor("#ffffff")
         ax = fig.add_subplot(111)
         ax.set_facecolor("#f2f4f3")
@@ -649,7 +655,7 @@ class SolarWidget(ctk.CTk):
         hours  = list(range(24))
         values = [0]*24
 
-        ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.85)
+        ax.bar(hours, values, color="#3ec9b6", width=0.8, alpha=0.7)
         ax.set_xlim(-0.5, 23.5)
         ax.set_ylim(0, 3.2)
         ax.set_xticks([0, 6, 12, 18, 23])
@@ -710,17 +716,27 @@ class SolarWidget(ctk.CTk):
                 self._update_daily_stats(live, store)
 
             if store:
-                best = store.get("best_hour_kwh", 0.0)
-                self._refs["best_hour"].configure(
-                    text=f"{best:.2f}" if best else "--")
+                best_day = snap.get("best_day", {})
+                bd_kwh  = best_day.get("kwh", 0.0)
+                bd_date = best_day.get("date")
+                if bd_kwh:
+                    self._refs["best_day_kwh"].configure(text=f"{bd_kwh:.2f}")
+                    if bd_date:
+                        d = datetime.date.fromisoformat(bd_date)
+                        self._refs["best_day_date"].configure(
+                            text=d.strftime("%d %b").lstrip("0"))
+                else:
+                    self._refs["best_day_kwh"].configure(text="--")
+                    self._refs["best_day_date"].configure(text="")
+
                 if self.lt_panel:
                     self.lt_panel.update_data(store)
 
                 history = store.get("daily_history", [])
                 if history:
-                    n = len(history)
-                    avg_gen  = sum(d["generation_kwh"] for d in history) / n
-                    avg_exp  = sum(d["export_kwh"] for d in history) / n
+                    last7    = history[-7:]
+                    avg_gen  = sum(d["generation_kwh"] for d in last7) / 7
+                    avg_exp  = sum(d["export_kwh"] for d in last7) / 7
                     avg_earn = avg_exp * config.OCTOPUS_SEG_RATE
                     self._refs["avg_gen"].configure(text=f"{avg_gen:.1f} kWh")
                     self._refs["avg_export"].configure(
@@ -731,18 +747,25 @@ class SolarWidget(ctk.CTk):
     def _update_daily_stats(self, live, store):
         """Update generated/exported/earnings based on today or week toggle."""
         if self._daily_mode == "today":
-            # Use live data for today
             self._refs["generated"].configure(text=f"{live['pv_day_kwh']} kWh")
             self._refs["load_pct"].configure(text=f"{live['load_satisfied_pct']}%")
-            self._refs["exported"].configure(text="--")
-            self._refs["earnings"].configure(text="--")
+            today_str = datetime.date.today().isoformat()
+            today_rec = next(
+                (d for d in store.get("daily_history", []) if d["date"] == today_str), None)
+            if today_rec and today_rec.get("export_kwh", 0.0):
+                self._refs["exported"].configure(
+                    text=f"{today_rec['export_kwh']:.2f} kWh")
+                self._refs["earnings"].configure(
+                    text=f"£{today_rec['export_earnings_gbp']:.2f}")
+            else:
+                self._refs["exported"].configure(text="--")
+                self._refs["earnings"].configure(text="--")
         else:
-            # Week totals from data store
             totals = data_store.get_period_totals("week")
             self._refs["generated"].configure(text=f"{totals['generation_kwh']:.1f} kWh")
             self._refs["load_pct"].configure(text="--")
-            self._refs["exported"].configure(text="--")
-            self._refs["earnings"].configure(text="--")
+            self._refs["exported"].configure(text=f"{totals['export_kwh']:.1f} kWh")
+            self._refs["earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
 
     def _update_forecast_chart(self, hourly_kwh):
         ax     = self._refs["chart_ax"]
@@ -754,7 +777,7 @@ class SolarWidget(ctk.CTk):
         now    = datetime.datetime.now().hour
         colors = ["#3ec9b6" if h >= now else "#a8e8dc" for h in range(24)]
 
-        ax.bar(range(24), hourly_kwh, color=colors, width=0.8, alpha=0.85)
+        ax.bar(range(24), hourly_kwh, color=colors, width=0.8, alpha=0.7)
         ax.set_xlim(-0.5, 23.5)
         ax.set_ylim(0, 3.2)
         ax.set_xticks([0, 6, 12, 18, 23])
@@ -819,6 +842,7 @@ class SolarWidget(ctk.CTk):
         self.btn_week.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
+        self._update_ui()
 
     def _show_week(self):
         self._daily_mode = "week"
@@ -828,6 +852,7 @@ class SolarWidget(ctk.CTk):
         self.btn_today.configure(
             fg_color=CARD, text_color=MUTED,
             font=ctk.CTkFont(size=11))
+        self._update_ui()
 
     # ------------------------------------------------------------------ #
     # Windows always-on-bottom                                            #
