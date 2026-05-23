@@ -25,6 +25,8 @@ def _default():
         "cumulative_export_kwh":           0.0,
         "cumulative_export_earnings_gbp":  0.0,
         "best_hour_kwh":                   0.0,
+        "best_day_kwh":                    0.0,
+        "best_day_date":                   None,
         "install_cost_gbp":                None,
         "rates": [
             {
@@ -111,6 +113,11 @@ def update_daily(date_str, generation_kwh, export_kwh, import_kwh):
     data["cumulative_export_earnings_gbp"] = round(
         sum(d["export_earnings_gbp"] for d in history), 4)
 
+    if generation_kwh > data["best_day_kwh"]:
+        data["best_day_kwh"]  = round(generation_kwh, 3)
+        data["best_day_date"] = date_str
+        log.info("New best day: %.3f kWh on %s", generation_kwh, date_str)
+
     _save(data)
 
 def get_last_n_days(n=7):
@@ -135,6 +142,18 @@ def get_payoff_progress():
         "remaining_gbp":    round(remaining, 2),
         "percent_complete": round(pct, 2),
     }
+
+def recalculate_best_day():
+    """One-time backfill: find the best day from existing history and save it."""
+    data    = _load()
+    history = data["daily_history"]
+    if history:
+        best = max(history, key=lambda d: d["generation_kwh"])
+        data["best_day_kwh"]  = round(best["generation_kwh"], 3)
+        data["best_day_date"] = best["date"]
+        _save(data)
+        log.info("Backfilled best day: %.3f kWh on %s",
+                 data["best_day_kwh"], data["best_day_date"])
 
 def get_period_totals(period="day", reference_date=None):
     if reference_date is None:
