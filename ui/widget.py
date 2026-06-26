@@ -275,70 +275,21 @@ class LongTermPanel:
         self._lt_refs["lt_export"].configure(text=f"{totals['export_kwh']:.1f} kWh")
         self._lt_refs["lt_earnings"].configure(text=f"£{totals['earnings_gbp']:.2f}")
 
-        store   = data_store.get_all()
-        payoff  = store.get("install_cost_gbp")
-        if payoff:
-            history  = store.get("daily_history", [])
-            seg_rate = getattr(config, "OCTOPUS_SEG_RATE",    0.12)
-            imp_rate = getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
-
-            INSTALL_DATE = "2026-05-07"
-            SEG_DATE     = "2026-05-15"
-
-            # Export earnings: only from SEG start date
-            total_export_earn = sum(
-                d["export_kwh"] * seg_rate
-                for d in history if d["date"] >= SEG_DATE
-            )
-
-            # Import savings: self-used generation (gen - export) from install date
-            # This is the grid power displaced by solar, valued at import rate
-            total_import_saved = sum(
-                max(0.0, d["generation_kwh"] - d["export_kwh"]) * imp_rate
-                for d in history if d["date"] >= INSTALL_DATE
-            )
-
-            total_earn = round(total_export_earn + total_import_saved, 2)
-            pct        = min(1.0, total_earn / payoff)
+        payoff = data_store.get_payoff_progress()
+        cost   = payoff["install_cost_gbp"]
+        if cost:
+            pct = payoff["percent_complete"] / 100
             self._lt_refs["roi_bar"].place(relwidth=max(0.01, pct))
             self._lt_refs["roi_label"].configure(
-                text=f"£{total_earn:.2f} of £{payoff:.0f} · {pct*100:.1f}%")
-
-            # Avg daily export: days since SEG start
-            install_date_obj = datetime.date(2026, 5, 7)
-            seg_date_obj     = datetime.date(2026, 5, 15)
-            today            = datetime.date.today()
-            days_since_seg     = max(1, (today - seg_date_obj).days + 1)
-            days_since_install = max(1, (today - install_date_obj).days + 1)
-
-            avg_daily_export_earn  = total_export_earn  / days_since_seg
-            avg_daily_import_saved = total_import_saved / days_since_install
-
-            avg_daily_total = avg_daily_export_earn + avg_daily_import_saved
-            remaining       = max(0.0, payoff - total_earn)
+                text=f"£{payoff['earned_gbp']:.2f} of £{cost:.0f} · {payoff['percent_complete']:.1f}%")
 
             self._lt_refs["payoff_remaining"].configure(
-                text=f"£{remaining:,.0f} remaining")
-
-            if avg_daily_total > 0 and remaining > 0:
-                days_left = remaining / avg_daily_total
-                years     = int(days_left // 365)
-                months    = int((days_left % 365) // 30)
-                days      = int(days_left % 30)
-                parts = []
-                if years:  parts.append(f"{years}y")
-                if months: parts.append(f"{months}m")
-                if days or not parts: parts.append(f"{days}d")
-                self._lt_refs["payoff_countdown"].configure(text=" ".join(parts))
-            elif remaining <= 0:
-                self._lt_refs["payoff_countdown"].configure(text="Paid off! 🎉")
-            else:
-                self._lt_refs["payoff_countdown"].configure(text="--")
-
+                text=f"£{payoff['remaining_gbp']:,.0f} remaining")
+            self._lt_refs["payoff_countdown"].configure(text=payoff["countdown_text"])
             self._lt_refs["payoff_avg_export"].configure(
-                text=f"£{avg_daily_export_earn:.2f}/day")
+                text=f"£{payoff['avg_daily_export_earn']:.2f}/day")
             self._lt_refs["payoff_avg_import"].configure(
-                text=f"£{avg_daily_import_saved:.2f}/day")
+                text=f"£{payoff['avg_daily_import_saved']:.2f}/day")
 
     def update_data(self, store):
         """Called on every UI refresh — updates with current period data."""
@@ -822,17 +773,12 @@ class SolarWidget(ctk.CTk):
 
                 history = store.get("daily_history", [])
                 if history:
-                    last7    = history[-7:]
-                    avg_gen       = sum(d["generation_kwh"] for d in last7) / 7
-                    avg_exp       = sum(d["export_kwh"] for d in last7) / 7
-                    avg_earn      = avg_exp * config.OCTOPUS_SEG_RATE
-                    avg_self_used = sum(max(0.0, d["generation_kwh"] - d["export_kwh"]) for d in last7) / 7
-                    avg_imp_save  = avg_self_used * getattr(config, "OCTOPUS_IMPORT_RATE", 0.2189)
-                    self._refs["avg_gen"].configure(text=f"{avg_gen:.1f} kWh")
+                    avgs = data_store.get_seven_day_averages()
+                    self._refs["avg_gen"].configure(text=f"{avgs['avg_gen']:.1f} kWh")
                     self._refs["avg_export"].configure(
-                        text=f"{avg_exp:.1f} kWh · £{avg_earn:.2f}")
+                        text=f"{avgs['avg_export']:.1f} kWh · £{avgs['avg_export_earn']:.2f}")
                     self._refs["avg_import"].configure(
-                        text=f"£{avg_imp_save:.2f}/day")
+                        text=f"£{avgs['avg_import_saved']:.2f}/day")
 
         self.after(config.REFRESH_SECONDS * 1000, self._update_ui)
 

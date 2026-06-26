@@ -53,7 +53,7 @@ class DataRefresher:
         try:
             written = sigen_dev_client.backfill_history()
             log.info("Backfill wrote %d records.", written)
-            data_store.repair_best_day()
+            data_store.recalculate_best_day()
             with self._lock:
                 self.store = data_store.get_all()
         except Exception as exc:
