@@ -30,16 +30,18 @@ class DataRefresher:
         self._stop   = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
-        if _dev_api_configured():
-            # Backfill runs once at startup in a background thread so the UI
-            # isn't blocked. Populates daily_history with real API figures and
-            # sets best_day correctly from the full history.
-            threading.Thread(target=self._backfill, daemon=True).start()
-        else:
+        if not _dev_api_configured():
             log.warning("Dev API credentials not set — backfill and today stats unavailable.")
 
     def start(self):
         log.info("DataRefresher starting...")
+
+        if _dev_api_configured():
+            # Backfill runs once, after the initial refresh has completed, in a
+            # background thread so the UI isn't blocked. Covers the previous
+            # month only; the refresh covers the current month.
+            threading.Thread(target=self._backfill, daemon=True).start()
+
         self._thread.start()
 
     def stop(self):
@@ -81,10 +83,13 @@ class DataRefresher:
                 "exporting" if live["is_exporting"] else "importing",
             )
 
-        # 2. Today's accurate running totals from the dev API (sums 5-min intervals)
+        # 2. Current month's per-day totals from the dev API (includes today)
+        today       = datetime.date.today().isoformat()
+        month_days  = []
         today_stats = None
         if _dev_api_configured():
-            today_stats = sigen_dev_client.get_today_stats()
+            month_days  = sigen_dev_client.get_month_daily_breakdown(datetime.date.today())
+            today_stats = next((d for d in month_days if d["date"] == today), None)
             if today_stats:
                 log.info(
                     "Today: gen=%.2fkWh  export=%.2fkWh  import=%.2fkWh",
@@ -101,21 +106,29 @@ class DataRefresher:
             log.info("Weather: %s %.1f°C",
                      weather["description"], weather["temperature"])
 
-        # 4. Update today's record in the data store.
-        #    Use dev API totals when available; fall back to live pvDayNrg
-        #    for generation and 0 for export/import (backfill corrects history).
-        if live:
-            today      = datetime.date.today().isoformat()
-            gen_kwh    = today_stats["generation_kwh"] if today_stats else live["pv_day_kwh"]
-            export_kwh = today_stats["export_kwh"]     if today_stats else 0.0
-            import_kwh = today_stats["import_kwh"]     if today_stats else 0.0
+        # 4. Update the data store.
+        #    Write every day of the current month (up to today) from the dev API.
+        #    If today isn't available from the dev API, fall back to live
+        #    pvDayNrg for generation and 0 for export/import.
+        for day in month_days:
+            if day["date"] > today:
+                continue
+            data_store.update_daily(
+                date_str=day["date"],
+                generation_kwh=day["generation_kwh"],
+                export_kwh=day["export_kwh"],
+                import_kwh=day["import_kwh"],
+            )
 
+        if not today_stats and live:
             data_store.update_daily(
                 date_str=today,
-                generation_kwh=gen_kwh,
-                export_kwh=export_kwh,
-                import_kwh=import_kwh,
+                generation_kwh=live["pv_day_kwh"],
+                export_kwh=0.0,
+                import_kwh=0.0,
             )
+
+        if month_days or live:
             with self._lock:
                 self.store = data_store.get_all()
 

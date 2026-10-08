@@ -235,10 +235,11 @@ def get_month_daily_breakdown(target_date: datetime.date) -> list[dict]:
     return days
 
 
-def backfill_history(since_date: datetime.date | None = None) -> int:
+def backfill_history() -> int:
     """
-    Pull per-day history and upsert into the local data store.
-    Walks month-by-month from since_date (default: install date) to today.
+    Pull per-day history for the previous calendar month and upsert into
+    the local data store. The current month is handled by the refresh;
+    anything older is recovered manually.
     Returns number of day records written.
     """
     from core import data_store
@@ -246,32 +247,23 @@ def backfill_history(since_date: datetime.date | None = None) -> int:
     onboard()  # non-fatal if it fails
 
     install_date = datetime.date(2026, 5, 7)
-    if since_date is None:
-        since_date = install_date
+    today        = datetime.date.today()
+    prev_month   = today.replace(day=1) - datetime.timedelta(days=1)
 
-    today   = datetime.date.today()
+    log.info("Backfilling %d-%02d...", prev_month.year, prev_month.month)
+    days    = get_month_daily_breakdown(prev_month)
     written = 0
-    cursor  = since_date.replace(day=1)
 
-    while cursor <= today:
-        log.info("Backfilling %d-%02d...", cursor.year, cursor.month)
-        days = get_month_daily_breakdown(cursor)
-
-        for day in days:
-            if day["date"] < install_date.isoformat():
-                continue
-            if day["date"] > today.isoformat():
-                continue
-            data_store.update_daily(
-                date_str=day["date"],
-                generation_kwh=day["generation_kwh"],
-                export_kwh=day["export_kwh"],
-                import_kwh=day["import_kwh"],
-            )
-            written += 1
-
-        # Advance to first of next month
-        cursor = (cursor.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    for day in days:
+        if day["date"] < install_date.isoformat():
+            continue
+        data_store.update_daily(
+            date_str=day["date"],
+            generation_kwh=day["generation_kwh"],
+            export_kwh=day["export_kwh"],
+            import_kwh=day["import_kwh"],
+        )
+        written += 1
 
     log.info("Backfill complete: %d records written.", written)
     return written
